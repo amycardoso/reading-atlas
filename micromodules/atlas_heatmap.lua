@@ -24,12 +24,24 @@ local function render(ctx)
 
     local year = tonumber(os.date("%Y"))
     local by_day = atlas("aggregate").byDay(rows)
+    local cal = atlas("calendar").columns(year)
+
+    -- byDay carries every day ever recorded, but only the rendered year's
+    -- days are eligible to set the quartile thresholds -- otherwise a heavy
+    -- past year can make every day of a light current year land in the
+    -- bottom bucket, and two of the five levels never get painted.
     local values = {}
-    for _k, v in pairs(by_day) do values[#values + 1] = v end
+    for col = 1, cal.weeks do
+        for row = 1, 7 do
+            local key = cal.dayKey(col, row)
+            if key and by_day[key] then
+                values[#values + 1] = by_day[key]
+            end
+        end
+    end
     local Scale = atlas("scale")
     local thresholds = Scale.thresholds(values)
 
-    local cal = atlas("calendar").columns(year)
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
 
