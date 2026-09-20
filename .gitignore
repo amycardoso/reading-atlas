@@ -1,0 +1,18 @@
+# Lua
+*.rock
+luacov.*
+
+# Build output
+dist/
+*.zip
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local scratch: copies of a real statistics.sqlite3 used while testing
+*.sqlite3
+*.sqlite3-journal
+scratch/
