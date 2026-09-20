@@ -18,13 +18,13 @@ local M = {}
 
 local _cache = nil      -- nil | false | table
 local _querying = false
+local _pending = {}     -- refresh callbacks waiting on the in-flight query
 
 local function defaultDeps()
     local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
     return {
         query = function() return dofile(dir .. "db.lua").hourRows() end,
         schedule = function(fn) require("ui/uimanager"):scheduleIn(0, fn) end,
-        now = os.time,
     }
 end
 
@@ -32,21 +32,35 @@ end
 function M.reset()
     _cache = nil
     _querying = false
+    _pending = {}
 end
 
 function M.get(refresh, deps)
     deps = deps or defaultDeps()
     if _cache ~= nil then return _cache end
+    -- Every caller's refresh must survive to the query landing, even callers
+    -- that arrive while a query is already in flight (the hero grid and the
+    -- start menu can both render the same module in one frame). Collecting
+    -- into _pending here, before the _querying guard below, is what makes
+    -- that true.
+    if refresh then _pending[#_pending + 1] = refresh end
     if _querying then return nil end
     _querying = true
     deps.schedule(function()
         local ok, rows = pcall(deps.query)
-        -- Both a raised error and a nil return mean the same thing to a
-        -- reader: there are no statistics to show. Never leave the cache at
-        -- nil here, or the module would re-query on every single render.
-        _cache = (ok and rows) or false
+        -- A raised error, a nil return, and a zero-length result all mean
+        -- the same thing to a reader: there are no statistics to show.
+        -- Never leave the cache at nil here, or the module would re-query
+        -- on every single render.
+        if ok and rows and #rows > 0 then
+            _cache = rows
+        else
+            _cache = false
+        end
         _querying = false
-        if refresh then pcall(refresh) end
+        local callbacks = _pending
+        _pending = {}
+        for i = 1, #callbacks do pcall(callbacks[i]) end
     end)
     return nil
 end

@@ -84,4 +84,25 @@ t.test("a query that raises resolves to false and does not wedge the guard", fun
     eq(Source.get(nil, d.deps), false)
 end)
 
+t.test("every caller's refresh fires, not just the first in the frame", function()
+    Source.reset()
+    local heatmap_fired, clock_fired = 0, 0
+    local d = makeDeps(function() return { { hour = 10, secs = 60 } } end)
+    Source.get(function() heatmap_fired = heatmap_fired + 1 end, d.deps)
+    Source.get(function() clock_fired = clock_fired + 1 end, d.deps)
+    eq(d.pendingCount(), 1, "still only one query scheduled")
+    d.run()
+    eq(heatmap_fired, 1, "the first caller's refresh must fire")
+    eq(clock_fired, 1, "the second caller's refresh must also fire")
+end)
+
+t.test("an empty rows table resolves to false, not an empty table", function()
+    Source.reset()
+    local d = makeDeps(function() return {} end)
+    Source.get(nil, d.deps)
+    d.run()
+    eq(Source.get(nil, d.deps), false,
+        "a statistics database with zero rows is the no-statistics state")
+end)
+
 t.done()
