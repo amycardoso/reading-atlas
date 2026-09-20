@@ -22,15 +22,18 @@ M.INK = { [0] = 0xE0, [1] = 0xB0, [2] = 0x80, [3] = 0x50, [4] = 0x20 }
 -- to a sibling dofile so this file also works standalone in tests.
 function M.setGrid(grid_mod) Grid = grid_mod end
 
-local function grid()
+local function resolveGrid(opts)
+    -- Per-instance resolution: opts.grid takes precedence, then module-level
+    -- default (set by setGrid), then sibling dofile fallback.
+    if opts.grid then return opts.grid end
     if Grid then return Grid end
     local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
-    Grid = dofile(dir .. "grid.lua")
-    return Grid
+    return dofile(dir .. "grid.lua")
 end
 
 function M.new(opts)
-    local g = grid().layout{
+    local gridMod = resolveGrid(opts)
+    local g = gridMod.layout{
         width = opts.width, height = opts.height,
         cols = opts.cols, rows = opts.rows,
         gap_ratio = opts.gap_ratio,
@@ -38,6 +41,7 @@ function M.new(opts)
     local w = {
         cols = opts.cols, rows = opts.rows,
         level = opts.level,
+        grid = gridMod,
         geom = g,
         dimen = Geom:new{ w = g.w, h = g.h },
     }

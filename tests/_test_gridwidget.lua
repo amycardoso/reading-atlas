@@ -44,4 +44,42 @@ t.test("step 0 is grey, not white: an unread day stays part of the grid", functi
     assert(GW.INK[0] < 255, "level 0 must not be pure white")
 end)
 
+t.test("per-instance grid injection via opts.grid", function()
+    local fakeGrid = {
+        layout = function()
+            return { cell = 10, gap = 2, w = 123, h = 45 }
+        end
+    }
+    local w = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+                      level = function() return 0 end,
+                      grid = fakeGrid }
+    local size = w:getSize()
+    eq(size.w, 123)
+    eq(size.h, 45)
+end)
+
+t.test("isolation: widget unaffected by setGrid after creation", function()
+    local fakeGrid1 = {
+        layout = function()
+            return { cell = 10, gap = 2, w = 100, h = 50 }
+        end
+    }
+    local fakeGrid2 = {
+        layout = function()
+            return { cell = 5, gap = 1, w = 200, h = 100 }
+        end
+    }
+    GW.setGrid(fakeGrid1)
+    local w = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+                      level = function() return 0 end }
+    local size1 = w:getSize()
+    eq(size1.w, 100)
+    eq(size1.h, 50)
+
+    GW.setGrid(fakeGrid2)
+    local size2 = w:getSize()
+    eq(size2.w, 100)
+    eq(size2.h, 50)
+end)
+
 t.done()
