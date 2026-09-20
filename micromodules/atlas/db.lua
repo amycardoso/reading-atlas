@@ -27,23 +27,26 @@ function M.hourRows()
     local ok_sq, SQ3 = pcall(require, "lua-ljsqlite3/init")
     if not ok_sq then return nil end
 
-    local ok, rows = pcall(function()
-        local conn = SQ3.open(path, "ro")
+    local conn
+    local ok, result = pcall(function()
+        conn = SQ3.open(path, "ro")
         conn:exec("PRAGMA busy_timeout=200;")
-        local result = conn:exec(SQL)
-        conn:close()
-        if not result or not result[1] then return {} end
-        local out = {}
-        for i = 1, #result[1] do
-            out[i] = {
-                hour = tonumber(result[1][i]),
-                secs = tonumber(result[2][i]) or 0,
-            }
-        end
-        return out
+        return conn:exec(SQL)
     end)
+
+    if conn then pcall(function() conn:close() end) end
+
     if not ok then return nil end
-    return rows
+    if not result or not result[1] then return {} end
+
+    local out = {}
+    for i = 1, #result[1] do
+        out[i] = {
+            hour = tonumber(result[1][i]),
+            secs = tonumber(result[2][i]) or 0,
+        }
+    end
+    return out
 end
 
 return M
