@@ -70,4 +70,21 @@ t.test("byHourWeekday returns a full 7x24 grid, zeros included", function()
     eq(sum, 60, "only the seeded minute should be counted")
 end)
 
+t.test("byDay respects the injected localtime crossing a day boundary", function()
+    -- +3h offset makes Monday 23:00 UTC become Tuesday 02:00 local.
+    local plus3h = function(ts) return os.date("!*t", ts + 3 * 3600) end
+    local MON_2300 = 1767654000  -- 2026-01-05T23:00:00Z
+    local rows = { { hour = math.floor(MON_2300 / 3600), secs = 500 } }
+    eq(Agg.byDay(rows, plus3h), { ["2026-01-06"] = 500 })
+end)
+
+t.test("byHourWeekday respects the injected localtime changing weekday", function()
+    -- +3h offset makes Monday 23:00 UTC become Tuesday 02:00 local.
+    local plus3h = function(ts) return os.date("!*t", ts + 3 * 3600) end
+    local MON_2300 = 1767654000  -- 2026-01-05T23:00:00Z
+    local rows = { { hour = math.floor(MON_2300 / 3600), secs = 500 } }
+    local got = Agg.byHourWeekday(rows, plus3h)
+    eq(got[3][2], 500)  -- Tuesday (wday=3) at 02:00 (hour=2)
+end)
+
 t.done()
