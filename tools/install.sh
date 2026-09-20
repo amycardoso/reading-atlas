@@ -19,6 +19,11 @@ if [ ! -d "$SETTINGS" ]; then
     exit 2
 fi
 
+# Resolve to an absolute path now, before anything below cd's the shell to
+# the repo root: a relative $SETTINGS would otherwise resolve against two
+# different working directories between mkdir and cp.
+SETTINGS="$(cd "$SETTINGS" && pwd)"
+
 DEST="$SETTINGS/bookshelf/micromodules"
 mkdir -p "$DEST/atlas"
 
