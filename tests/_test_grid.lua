@@ -44,4 +44,37 @@ t.test("zero or negative box still returns a paintable 1px cell", function()
     assert(g.cell >= 1, "cell was " .. tostring(g.cell))
 end)
 
+t.test("extent never overflows the width across the realistic range", function()
+    -- Sweep widths 100..1200 with the year heatmap's shape (cols=53)
+    for width = 100, 1200 do
+        for _, rows in ipairs({1, 7}) do
+            local g = Grid.layout{ width = width, height = 1000, cols = 53, rows = rows }
+            if g.cell > 1 then
+                assert(g.w <= width, ("overflow at w=%d rows=%d: cell=%d gap=%d extent=%d"):format(
+                    width, rows, g.cell, g.gap, g.w))
+            end
+        end
+    end
+end)
+
+t.test("extent never overflows the height across the realistic range", function()
+    -- Sweep heights 50..500 with the year heatmap's shape (rows=7)
+    for height = 50, 500 do
+        for _, cols in ipairs({1, 53}) do
+            local g = Grid.layout{ width = 1000, height = height, cols = cols, rows = 7 }
+            if g.cell > 1 then
+                assert(g.h <= height, ("overflow at h=%d cols=%d: cell=%d gap=%d extent=%d"):format(
+                    height, cols, g.cell, g.gap, g.h))
+            end
+        end
+    end
+end)
+
+t.test("non-default gap_ratio is actually used", function()
+    local g1 = Grid.layout{ width = 200, height = 200, cols = 5, rows = 5, gap_ratio = 0.1 }
+    local g2 = Grid.layout{ width = 200, height = 200, cols = 5, rows = 5, gap_ratio = 0.5 }
+    -- With larger gap_ratio, gap should be larger (all else equal)
+    assert(g2.gap > g1.gap, ("gap_ratio not used: 0.1 gap=%d, 0.5 gap=%d"):format(g1.gap, g2.gap))
+end)
+
 t.done()

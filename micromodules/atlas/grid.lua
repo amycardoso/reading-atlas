@@ -27,7 +27,16 @@ function M.layout(opts)
     if cell < 1 then cell = 1 end
 
     local gap = math.floor(cell * ratio)
-    if cell > 2 and gap < 1 then gap = 1 end
+
+    -- Try to bump gap from 0 to 1 for visible separation, but only if
+    -- it doesn't exceed the bounds and there are actually gaps to draw.
+    if gap == 0 and cell > 2 and (cols > 1 or rows > 1) then
+        local w_with_gap = cell * cols + 1 * math.max(0, cols - 1)
+        local h_with_gap = cell * rows + 1 * math.max(0, rows - 1)
+        if w_with_gap <= width and h_with_gap <= height then
+            gap = 1
+        end
+    end
 
     -- Only one cell means no gaps at all
     if cols == 1 and rows == 1 then
