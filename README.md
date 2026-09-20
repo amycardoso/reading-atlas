@@ -7,8 +7,8 @@ Bookshelf already gives you a home screen worth looking at. Reading Atlas adds
 panels to it that show *your reading*: when you read, how much, and — later —
 what you read.
 
-> **Status: in design.** Nothing is installable yet. The design document is at
-> [`docs/superpowers/specs/`](docs/superpowers/specs/) (in Portuguese).
+> **Status: phase 1 usable.** `atlas_heatmap` and `atlas_clock` install and
+> run. Install with `sh tools/install.sh <koreader-settings-dir>`.
 
 ## What it will have
 
