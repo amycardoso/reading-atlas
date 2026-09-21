@@ -31,5 +31,13 @@ cd "$(dirname "$0")/.."
 cp micromodules/atlas_heatmap.lua micromodules/atlas_clock.lua "$DEST/"
 cp micromodules/atlas/*.lua "$DEST/atlas/"
 
+# macOS writes AppleDouble sidecars (._name) when copying onto the FAT/exFAT
+# filesystem an e-reader exposes over USB. Two of them -- ._atlas_heatmap.lua
+# and ._atlas_clock.lua -- end in ".lua", which is exactly what bookshelf's
+# scanner matches, so it would try to dofile a binary sidecar. It survives that
+# (the loader pcalls and skips) but logs a warning per file for no reason.
+# Harmless no-op on Linux, where these never exist.
+rm -f "$DEST"/._* "$DEST"/atlas/._* "$DEST"/../._* 2>/dev/null || true
+
 echo "installed to $DEST"
 echo "restart KOReader, then add the modules from the bookshelf module picker."
