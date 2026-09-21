@@ -51,8 +51,19 @@ not a bug to fix in `grid.lua`.
 
 ## Still unverified
 
-Nothing in this repository has ever executed inside KOReader. `db.lua`,
-`gridwidget.lua`'s `paintTo`, and both module files have no unit tests and
-cannot have them off-device. The on-device checklist in
-`docs/superpowers/plans/2026-09-20-reading-atlas-phase-1.md` (Task 9, Step 3)
-has **not** been run.
+Installation on a real Kindle is verified, and every pure helper has been run
+against a real `statistics.sqlite3` (10 books, 696 page-session rows) producing
+correct heatmap and clock grids — all five intensity levels used, quartiles
+evenly distributed.
+
+What remains unverified is anything that only happens *inside* KOReader:
+`gridwidget.lua`'s `paintTo` against a real blitbuffer, `db.lua`'s SQLite access
+through KOReader's own bindings, and whether the five greys are distinguishable
+on the actual panel. Those cannot be tested off-device and have never run.
+
+## macOS writes sidecar files onto e-reader filesystems
+
+Copying to the FAT/exFAT volume a Kindle exposes creates AppleDouble `._name`
+files. Two of them end in `.lua` and land exactly where bookshelf's scanner
+looks. `tools/install.sh` strips them; anything else that writes modules to a
+device from macOS must do the same.
