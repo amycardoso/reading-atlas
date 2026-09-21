@@ -7,8 +7,10 @@ Bookshelf already gives you a home screen worth looking at. Reading Atlas adds
 panels to it that show *your reading*: when you read, how much, and — later —
 what you read.
 
-> **Status: in design.** Nothing is installable yet. The design document is at
-> [`docs/superpowers/specs/`](docs/superpowers/specs/) (in Portuguese).
+> **Status: phase 1 built, not yet run on a device.** `atlas_heatmap` and
+> `atlas_clock` install cleanly — that part is verified. Whether they draw
+> correctly on real e-ink is not: nothing here has executed inside KOReader yet.
+> Install with `sh tools/install.sh <koreader-settings-dir>` and see for yourself.
 
 ## What it will have
 
@@ -52,8 +54,10 @@ This project stands next to, not against, work that already exists and is good:
 - [KoShelf](https://github.com/paviro/KoShelf) — highlights and notes as a
   reading dashboard.
 
-If you want reading statistics today, install those. Reading Atlas is aimed at
-the axis they leave open: not *when* you read, but *what*.
+If you want reading statistics today, install those. Phase 1 of Reading Atlas
+covers the same axis they do — *when* you read — and covers it well. Where
+this project is going is the axis they leave open: the reading map — language,
+author, series, and later geography — the *what*, not the *when*.
 
 ## License
 

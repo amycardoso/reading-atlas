@@ -285,7 +285,7 @@ instead and memoizes in package.loaded."
 ### Task 2: Day and hour×weekday bucketing
 
 **Files:**
-- Modify: `micromodules/atlas/aggregate.lua`
+- Create: `micromodules/atlas/aggregate.lua`
 - Test: `tests/_test_aggregate.lua`
 
 **Interfaces:**
@@ -387,7 +387,7 @@ Expected: FAIL — `attempt to call field 'byDay' (a nil value)`
 
 - [ ] **Step 3: Implement**
 
-Replace `micromodules/atlas/aggregate.lua`:
+Create `micromodules/atlas/aggregate.lua`:
 
 ```lua
 -- Pure bucketing of reading time. No KOReader, no I/O, no globals touched.
