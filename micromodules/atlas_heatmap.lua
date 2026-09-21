@@ -14,11 +14,11 @@ local function render(ctx)
 
     if rows == nil then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
-            heading = _("Reading year"), value = _("Reading…") }
+            heading = _("Atlas year"), value = _("Reading…") }
     end
     if rows == false then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
-            heading = _("Reading year"), value = _("No statistics"),
+            heading = _("Atlas year"), value = _("No statistics"),
             sub = _("KOReader's statistics plugin has no data yet.") }
     end
 
@@ -69,7 +69,7 @@ local function render(ctx)
     local hface, hbold = Kit.face(15, scale_pct, { bold = true })
     local sface = Kit.face(12, scale_pct)
 
-    local heading = TextWidget:new{ text = _("Reading year"), face = hface,
+    local heading = TextWidget:new{ text = _("Atlas year"), face = hface,
         bold = hbold, fgcolor = Kit.COLOR_MUTED, max_width = width }
     local amount = (total >= 3600)
         and string.format("%.1f h", total / 3600)
@@ -107,7 +107,7 @@ end
 
 return {
     key     = "atlas_heatmap",
-    title   = _("Reading year"),
-    summary = _("From KOReader statistics. Works offline."),
+    title   = _("Atlas year"),
+    summary = _("Your reading year as a grid of days. Works offline."),
     render  = render,
 }

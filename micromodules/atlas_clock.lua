@@ -11,11 +11,11 @@ local function render(ctx)
 
     if rows == nil then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
-            heading = _("Reading clock"), value = _("Reading…") }
+            heading = _("Atlas hours"), value = _("Reading…") }
     end
     if rows == false then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
-            heading = _("Reading clock"), value = _("No statistics"),
+            heading = _("Atlas hours"), value = _("No statistics"),
             sub = _("KOReader's statistics plugin has no data yet.") }
     end
 
@@ -46,7 +46,7 @@ local function render(ctx)
     local hface, hbold = Kit.face(15, scale_pct, { bold = true })
     local sface = Kit.face(12, scale_pct)
 
-    local heading = TextWidget:new{ text = _("Reading clock"), face = hface,
+    local heading = TextWidget:new{ text = _("Atlas hours"), face = hface,
         bold = hbold, fgcolor = Kit.COLOR_MUTED, max_width = width }
     local sub = TextWidget:new{
         text = (peak_v > 0)
@@ -81,7 +81,7 @@ end
 
 return {
     key     = "atlas_clock",
-    title   = _("Reading clock"),
-    summary = _("From KOReader statistics. Works offline."),
+    title   = _("Atlas hours"),
+    summary = _("When you read, by hour and weekday. Works offline."),
     render  = render,
 }
