@@ -70,6 +70,23 @@ t.test("extent never overflows the height across the realistic range", function(
     end
 end)
 
+t.test("a paintable cell always gets visible separation, even in a narrow band", function()
+    -- The year heatmap's shape (53x7) at its shipped fallback height
+    -- (height = width / 7). Below ~211px the old bump-to-1 logic never
+    -- triggered, so cell >= 2 could still ship with gap == 0: a smear of
+    -- touching squares on a panel with no antialiasing.
+    for width = 160, 600 do
+        local height = math.floor(width / 7)
+        local g = Grid.layout{ width = width, height = height, cols = 53, rows = 7 }
+        if g.cell >= 2 then
+            assert(g.gap >= 1, ("width=%d height=%d: cell=%d but gap=%d"):format(
+                width, height, g.cell, g.gap))
+        end
+        assert(g.w <= width, ("overflow at width=%d: w=%d"):format(width, g.w))
+        assert(g.h <= height, ("overflow at width=%d: h=%d"):format(width, g.h))
+    end
+end)
+
 t.test("non-default gap_ratio is actually used", function()
     local g1 = Grid.layout{ width = 200, height = 200, cols = 5, rows = 5, gap_ratio = 0.1 }
     local g2 = Grid.layout{ width = 200, height = 200, cols = 5, rows = 5, gap_ratio = 0.5 }
