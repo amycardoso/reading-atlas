@@ -20,27 +20,62 @@ local function render(ctx)
     end
 
     local grid_data = atlas("aggregate").byHourWeekday(rows)
-    local values = {}
-    for wday = 1, 7 do
-        for hour = 0, 23 do
-            values[#values + 1] = grid_data[wday][hour]
-        end
-    end
     local Scale = atlas("scale")
+
+    local values, peak_h, peak_v = {}, 0, -1
+    for hour = 0, 23 do
+        local hour_total = 0
+        for wday = 1, 7 do
+            values[#values + 1] = grid_data[wday][hour]
+            hour_total = hour_total + grid_data[wday][hour]
+        end
+        if hour_total > peak_v then peak_v, peak_h = hour_total, hour end
+    end
     local thresholds = Scale.thresholds(values)
+
+    -- Every sixth hour, so the strip reads as a day without crowding.
+    local hours = {}
+    for hour = 0, 23, 6 do
+        hours[#hours + 1] = { col = hour + 1, text = string.format("%02dh", hour) }
+    end
+
+    local TextWidget    = require("ui/widget/textwidget")
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan  = require("ui/widget/verticalspan")
+    local sc = Kit.sc(scale_pct)
+    local hface, hbold = Kit.face(15, scale_pct, { bold = true })
+    local sface = Kit.face(12, scale_pct)
+
+    local heading = TextWidget:new{ text = _("Reading clock"), face = hface,
+        bold = hbold, fgcolor = Kit.COLOR_MUTED, max_width = width }
+    local sub = TextWidget:new{
+        text = (peak_v > 0)
+            and string.format("%s %02dh", _("you read most around"), peak_h)
+            or _("rows are weekdays, columns are hours"),
+        face = sface, fgcolor = Kit.COLOR_MUTED, max_width = width }
+
+    local chrome = heading:getSize().h + sub:getSize().h + sc(6)
+    local avail = ctx.height and math.max(sc(20), ctx.height - chrome)
+        or math.floor(width / 3)
 
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
-
-    return GW.new{
-        width = width,
-        height = ctx.height or math.floor(width / 3),
-        cols = 24,
-        rows = 7,
+    local grid = GW.new{
+        width = width, height = avail, cols = 24, rows = 7,
+        col_labels = hours, face = sface, label_color = Kit.COLOR_MUTED,
         -- col 1 is hour 0; row 1 is Sunday, matching os.date wday.
         level = function(col, row)
             return Scale.level(grid_data[row][col - 1], thresholds)
         end,
+    }
+
+    return VerticalGroup:new{
+        align = "left",
+        heading,
+        VerticalSpan:new{ width = sc(3) },
+        grid,
+        VerticalSpan:new{ width = sc(3) },
+        sub,
     }
 end
 

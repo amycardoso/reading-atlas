@@ -40,22 +40,58 @@ end
 
 local GridWidget = Widget:extend{}
 
+-- Height the column-label strip occupies, 0 when there are no labels.
+function GridWidget:labelHeight()
+    if not (self.col_labels and self.face) then return 0 end
+    if self._label_h then return self._label_h end
+    local TextWidget = require("ui/widget/textwidget")
+    local probe = TextWidget:new{ text = "M", face = self.face }
+    self._label_h = probe:getSize().h + math.max(1, math.floor(self.geom.cell / 3))
+    probe:free()
+    return self._label_h
+end
+
 function GridWidget:init()
     self.geom = self.gridMod.layout{
         width = self.width, height = self.height,
         cols = self.cols, rows = self.rows,
         gap_ratio = self.gap_ratio,
     }
-    self.dimen = Geom:new{ w = self.geom.w, h = self.geom.h }
+    self.dimen = Geom:new{ w = self.geom.w, h = self.geom.h + self:labelHeight() }
 end
 
 function GridWidget:getSize()
-    return Geom:new{ w = self.geom.w, h = self.geom.h }
+    return Geom:new{ w = self.geom.w, h = self.geom.h + self:labelHeight() }
+end
+
+-- Column labels (month names on the year grid, hours on the clock), drawn at
+-- the x offset of the column they mark. A label is skipped when it would
+-- collide with the previous one, so a narrow card degrades to fewer labels
+-- rather than to overlapping mush.
+function GridWidget:paintLabels(bb, x, y)
+    local TextWidget = require("ui/widget/textwidget")
+    local step = self.geom.cell + self.geom.gap
+    local right_edge = -1
+    for i = 1, #self.col_labels do
+        local lb = self.col_labels[i]
+        local lx = x + (lb.col - 1) * step
+        local tw = TextWidget:new{ text = lb.text, face = self.face,
+            fgcolor = self.label_color }
+        local w = tw:getSize().w
+        if lx > right_edge and lx + w <= x + self.geom.w then
+            tw:paintTo(bb, lx, y)
+            right_edge = lx + w + step
+        end
+        tw:free()
+    end
 end
 
 function GridWidget:paintTo(bb, x, y)
     local g = self.geom
-    self.dimen = Geom:new{ x = x, y = y, w = g.w, h = g.h }
+    local lh = self:labelHeight()
+    self.dimen = Geom:new{ x = x, y = y, w = g.w, h = g.h + lh }
+    if lh > 0 then self:paintLabels(bb, x, y) end
+    y = y + lh
     local step = g.cell + g.gap
     for col = 1, self.cols do
         for row = 1, self.rows do
@@ -75,6 +111,9 @@ function M.new(opts)
         height   = opts.height,
         gap_ratio = opts.gap_ratio,
         gridMod  = resolveGrid(opts),
+        col_labels  = opts.col_labels,
+        face        = opts.face,
+        label_color = opts.label_color,
     }
 end
 
