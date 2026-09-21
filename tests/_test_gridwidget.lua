@@ -1,6 +1,12 @@
--- Only the size contract is testable off-device: paintTo needs a real
--- blitbuffer. What matters here is that the widget reports the size it will
--- actually paint, because the host lays out around that number.
+-- Two things are testable off-device: the size contract, and that the object
+-- is a real KOReader Widget.
+--
+-- The second one is here because its absence crashed a Kindle. The widget was
+-- once a bare table with getSize/paintTo. It painted correctly -- every test
+-- and every review passed -- and then the first event a container propagated
+-- into it called a nil handleEvent, the error escaped the UI loop, and
+-- KOReader died to the launcher. Painting correctly is not the same as being
+-- a widget.
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local H = dofile("tests/_helpers.lua")
@@ -14,6 +20,25 @@ package.loaded["ui/geometry"] = {
 package.loaded["ffi/blitbuffer"] = {
     Color8 = function(v) return { v = v } end,
 }
+-- Mimics KOReader's Widget closely enough to matter: extend/new with
+-- inheritance, init called on construction, and the protocol methods a
+-- container will reach for.
+local WidgetStub = {}
+function WidgetStub:extend(subclass)
+    subclass = subclass or {}
+    setmetatable(subclass, { __index = self })
+    return subclass
+end
+function WidgetStub:new(o)
+    o = o or {}
+    setmetatable(o, { __index = self })
+    if o.init then o:init() end
+    return o
+end
+function WidgetStub:handleEvent() return false end
+function WidgetStub:free() end
+function WidgetStub:onCloseWidget() end
+package.loaded["ui/widget/widget"] = WidgetStub
 
 local GW = dofile("micromodules/atlas/gridwidget.lua")
 
@@ -80,6 +105,25 @@ t.test("isolation: widget unaffected by setGrid after creation", function()
     local size2 = w:getSize()
     eq(size2.w, 100)
     eq(size2.h, 50)
+end)
+
+t.test("the returned object IS a Widget, not a bare table", function()
+    local w = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+                      level = function() return 0 end }
+    -- These are inherited, never defined in gridwidget.lua. If someone goes
+    -- back to returning a plain table, every one of them becomes nil and this
+    -- test fails instead of the user's e-reader.
+    for _, method in ipairs({ "handleEvent", "free", "onCloseWidget" }) do
+        assert(type(w[method]) == "function",
+            "widget is missing " .. method .. " -- is it still Widget:extend?")
+    end
+end)
+
+t.test("a propagated event does not raise", function()
+    local w = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+                      level = function() return 0 end }
+    local ok, err = pcall(function() return w:handleEvent({ handler = "onTap" }) end)
+    assert(ok, "handleEvent raised: " .. tostring(err))
 end)
 
 t.done()

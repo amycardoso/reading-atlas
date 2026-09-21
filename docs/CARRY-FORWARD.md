@@ -49,6 +49,24 @@ prefers larger touching cells over 1 px dots. If a future layout puts the year
 card in a narrower slot, it will read as a solid block — that is arithmetic,
 not a bug to fix in `grid.lua`.
 
+## Anything painted must extend KOReader's `Widget`
+
+`micromodules/atlas/gridwidget.lua` was once a bare Lua table carrying only
+`getSize` and `paintTo`. It painted correctly. Every unit test passed, and
+several careful reviews verified its arithmetic cell by cell. On a real Kindle
+it crashed KOReader to the launcher the moment a module was tapped, because a
+container propagated an event into it and `handleEvent` was nil — an error
+inside the UI loop takes the whole application down.
+
+The rule: anything handed to bookshelf as a widget must be
+`require("ui/widget/widget"):extend{}` and constructed with `:new{}`. Painting
+correctly is not the same as being a widget.
+
+No off-device test can catch this on its own — the suites stub `ui/geometry`
+and `ffi/blitbuffer` and never exercise the widget protocol — so
+`tests/_test_gridwidget.lua` now asserts the inherited methods exist. That
+assertion is the only thing standing between this bug and a user's e-reader.
+
 ## Still unverified
 
 Installation on a real Kindle is verified, and every pure helper has been run

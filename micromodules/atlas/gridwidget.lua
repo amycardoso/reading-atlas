@@ -8,6 +8,13 @@
 -- this one widget paints both the day heatmap and the hour x weekday clock.
 local Geom = require("ui/geometry")
 local Blitbuffer = require("ffi/blitbuffer")
+-- MUST extend KOReader's Widget. A bare table with getSize/paintTo looks like
+-- it works -- it paints -- but it carries none of the widget protocol, so the
+-- first event a container propagates into it (a tap, a refresh, a close) calls
+-- a nil handleEvent and the error escapes the UI loop, taking KOReader down to
+-- the launcher. Found the hard way on a Kindle; no off-device test can see it,
+-- because the suites stub these modules and only ever call getSize().
+local Widget = require("ui/widget/widget")
 
 local Grid = nil  -- injected below by the spec files' loader, or dofile'd
 
@@ -31,33 +38,44 @@ local function resolveGrid(opts)
     return dofile(dir .. "grid.lua")
 end
 
-function M.new(opts)
-    local gridMod = resolveGrid(opts)
-    local g = gridMod.layout{
-        width = opts.width, height = opts.height,
-        cols = opts.cols, rows = opts.rows,
-        gap_ratio = opts.gap_ratio,
+local GridWidget = Widget:extend{}
+
+function GridWidget:init()
+    self.geom = self.gridMod.layout{
+        width = self.width, height = self.height,
+        cols = self.cols, rows = self.rows,
+        gap_ratio = self.gap_ratio,
     }
-    local w = {
-        cols = opts.cols, rows = opts.rows,
-        level = opts.level,
-        grid = gridMod,
-        geom = g,
-        dimen = Geom:new{ w = g.w, h = g.h },
-    }
-    function w:getSize() return Geom:new{ w = g.w, h = g.h } end
-    function w:paintTo(bb, x, y)
-        self.dimen = Geom:new{ x = x, y = y, w = g.w, h = g.h }
-        local step = g.cell + g.gap
-        for col = 1, self.cols do
-            for row = 1, self.rows do
-                local lv = self.level(col, row) or 0
-                bb:paintRect(x + (col - 1) * step, y + (row - 1) * step,
-                    g.cell, g.cell, Blitbuffer.Color8(M.INK[lv] or M.INK[0]))
-            end
+    self.dimen = Geom:new{ w = self.geom.w, h = self.geom.h }
+end
+
+function GridWidget:getSize()
+    return Geom:new{ w = self.geom.w, h = self.geom.h }
+end
+
+function GridWidget:paintTo(bb, x, y)
+    local g = self.geom
+    self.dimen = Geom:new{ x = x, y = y, w = g.w, h = g.h }
+    local step = g.cell + g.gap
+    for col = 1, self.cols do
+        for row = 1, self.rows do
+            local lv = self.level(col, row) or 0
+            bb:paintRect(x + (col - 1) * step, y + (row - 1) * step,
+                g.cell, g.cell, Blitbuffer.Color8(M.INK[lv] or M.INK[0]))
         end
     end
-    return w
+end
+
+function M.new(opts)
+    return GridWidget:new{
+        cols     = opts.cols,
+        rows     = opts.rows,
+        level    = opts.level,
+        width    = opts.width,
+        height   = opts.height,
+        gap_ratio = opts.gap_ratio,
+        gridMod  = resolveGrid(opts),
+    }
 end
 
 return M
