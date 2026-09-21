@@ -54,8 +54,10 @@ This project stands next to, not against, work that already exists and is good:
 - [KoShelf](https://github.com/paviro/KoShelf) — highlights and notes as a
   reading dashboard.
 
-If you want reading statistics today, install those. Reading Atlas is aimed at
-the axis they leave open: not *when* you read, but *what*.
+If you want reading statistics today, install those. Phase 1 of Reading Atlas
+covers the same axis they do — *when* you read — and covers it well. Where
+this project is going is the axis they leave open: the reading map — language,
+author, series, and later geography — the *what*, not the *when*.
 
 ## License
 
