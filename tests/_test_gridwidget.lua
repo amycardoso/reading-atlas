@@ -149,16 +149,27 @@ t.test("a propagated event does not raise", function()
     assert(ok, "handleEvent raised: " .. tostring(err))
 end)
 
-t.test("labels add their strip to the reported height", function()
-    local base = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+t.test("the label strip comes out of the height budget, not on top of it", function()
+    -- This is the invariant that matters: whatever the caller stacks below the
+    -- grid must still fit. Reporting grid + labels ABOVE the budget pushes the
+    -- caller's own lines off the bottom of the card, which is how the clock
+    -- card lost its context line on a real Kindle.
+    local BUDGET = 200
+    local bare = GW.new{ width = 400, height = BUDGET, cols = 10, rows = 5,
                          grid = REAL_GRID, level = function() return 0 end }
-    local labelled = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+    local labelled = GW.new{ width = 400, height = BUDGET, cols = 10, rows = 5,
                              grid = REAL_GRID, level = function() return 0 end,
                              col_labels = { { col = 1, text = "jan" } },
                              face = "FACE" }
-    assert(labelled:getSize().h > base:getSize().h,
-        "a label strip must be included in getSize, or the host lays out over it")
-    eq(labelled:getSize().w, base:getSize().w, "labels must not change the width")
+    assert(labelled:getSize().h <= BUDGET,
+        "total height " .. labelled:getSize().h .. " exceeded the budget " .. BUDGET)
+    assert(labelled.geom.h < bare.geom.h,
+        "the grid must shrink to make room for the labels")
+    -- The width may well shrink: cells are square, so a grid given less height
+    -- gets smaller cells and therefore a narrower extent. What must never
+    -- happen is exceeding the width it was given.
+    assert(labelled:getSize().w <= 400,
+        "width " .. labelled:getSize().w .. " exceeded the 400 it was given")
 end)
 
 t.test("labels are skipped rather than drawn on top of each other", function()
@@ -185,6 +196,34 @@ t.test("without labels nothing is painted as text", function()
     local w = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
                       grid = REAL_GRID, level = function() return 0 end }
     eq(#paintedLabels(w), 0)
+end)
+
+t.test("when labels do not all fit, the drawn ones are a REGULAR subset", function()
+    -- Twelve months across a grid too narrow for all of them. Dropping
+    -- whichever ones happen to collide leaves ragged gaps that read as a bug
+    -- (a real card showed Jan Feb _ Apr _ Jun _ Aug Sep _ Nov Dec). A regular
+    -- stride reads as a deliberate choice instead.
+    local labels = {}
+    for m = 1, 12 do
+        labels[m] = { col = 1 + (m - 1) * 4, text = ("M%d"):format(m) }
+    end
+    local w = GW.new{ width = 260, height = 160, cols = 48, rows = 7,
+                      grid = REAL_GRID, level = function() return 0 end,
+                      face = "FACE", col_labels = labels }
+    local got = paintedLabels(w)
+    assert(#got >= 2, "expected at least two labels, drew " .. #got)
+    assert(#got < 12, "this case is supposed to be too narrow for all twelve")
+
+    local idx = {}
+    for _, painted_label in ipairs(got) do
+        idx[#idx + 1] = tonumber(painted_label.text:match("%d+"))
+    end
+    local stride = idx[2] - idx[1]
+    for i = 2, #idx do
+        eq(idx[i] - idx[i - 1], stride,
+            "labels must be evenly spaced, got stride " .. (idx[i] - idx[i - 1]))
+    end
+    eq(idx[1], 1, "a regular subset starts at the first label")
 end)
 
 t.done()

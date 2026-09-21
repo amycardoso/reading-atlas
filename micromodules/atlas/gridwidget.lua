@@ -41,47 +41,77 @@ end
 local GridWidget = Widget:extend{}
 
 -- Height the column-label strip occupies, 0 when there are no labels.
+-- Deliberately independent of the grid geometry: the strip is measured BEFORE
+-- the grid is solved, because it comes out of the same height budget and the
+-- grid only gets what is left.
 function GridWidget:labelHeight()
     if not (self.col_labels and self.face) then return 0 end
     if self._label_h then return self._label_h end
     local TextWidget = require("ui/widget/textwidget")
     local probe = TextWidget:new{ text = "M", face = self.face }
-    self._label_h = probe:getSize().h + math.max(1, math.floor(self.geom.cell / 3))
+    local h = probe:getSize().h
     probe:free()
+    self._label_h = h + math.max(1, math.floor(h / 4))
     return self._label_h
 end
 
 function GridWidget:init()
+    -- The label strip is part of what the caller budgeted for, so take it off
+    -- the top before solving the grid. Getting this wrong pushes whatever the
+    -- caller stacked below the grid off the bottom of the card.
+    local label_h = self:labelHeight()
+    local grid_h = self.height and math.max(1, self.height - label_h) or nil
     self.geom = self.gridMod.layout{
-        width = self.width, height = self.height,
+        width = self.width, height = grid_h,
         cols = self.cols, rows = self.rows,
         gap_ratio = self.gap_ratio,
     }
-    self.dimen = Geom:new{ w = self.geom.w, h = self.geom.h + self:labelHeight() }
+    self.dimen = Geom:new{ w = self.geom.w, h = self.geom.h + label_h }
 end
 
 function GridWidget:getSize()
     return Geom:new{ w = self.geom.w, h = self.geom.h + self:labelHeight() }
 end
 
--- Column labels (month names on the year grid, hours on the clock), drawn at
--- the x offset of the column they mark. A label is skipped when it would
--- collide with the previous one, so a narrow card degrades to fewer labels
--- rather than to overlapping mush.
+-- Column labels drawn at the x offset of the column they mark.
+--
+-- When they do not all fit, drop to a REGULAR subset -- every second label,
+-- every third, and so on -- rather than skipping whichever individual ones
+-- happen to collide. Irregular gaps read as a bug; "every other month" reads
+-- as a choice.
 function GridWidget:paintLabels(bb, x, y)
     local TextWidget = require("ui/widget/textwidget")
     local step = self.geom.cell + self.geom.gap
-    local right_edge = -1
-    for i = 1, #self.col_labels do
+    local n = #self.col_labels
+
+    local widths = {}
+    for i = 1, n do
+        local tw = TextWidget:new{ text = self.col_labels[i].text, face = self.face }
+        widths[i] = tw:getSize().w
+        tw:free()
+    end
+    local pad = math.max(2, math.floor(self:labelHeight() / 3))
+
+    local function fits(stride)
+        local prev_end = nil
+        for i = 1, n, stride do
+            local lx = (self.col_labels[i].col - 1) * step
+            if lx + widths[i] > self.geom.w then return false end
+            if prev_end and lx < prev_end then return false end
+            prev_end = lx + widths[i] + pad
+        end
+        return true
+    end
+
+    local stride = 1
+    while stride <= n and not fits(stride) do stride = stride + 1 end
+    if stride > n then return end
+
+    for i = 1, n, stride do
         local lb = self.col_labels[i]
-        local lx = x + (lb.col - 1) * step
         local tw = TextWidget:new{ text = lb.text, face = self.face,
             fgcolor = self.label_color }
-        local w = tw:getSize().w
-        if lx > right_edge and lx + w <= x + self.geom.w then
-            tw:paintTo(bb, lx, y)
-            right_edge = lx + w + step
-        end
+        tw:paintTo(bb, x + (lb.col - 1) * step, y)
         tw:free()
     end
 end
