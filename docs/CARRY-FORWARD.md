@@ -67,21 +67,29 @@ and `ffi/blitbuffer` and never exercise the widget protocol — so
 `tests/_test_gridwidget.lua` now asserts the inherited methods exist. That
 assertion is the only thing standing between this bug and a user's e-reader.
 
-## Still unverified
+## What device testing actually caught
 
-Installation on a real Kindle is verified, and every pure helper has been run
-against a real `statistics.sqlite3` (10 books, 696 page-session rows) producing
-correct heatmap and clock grids — all five intensity levels used, quartiles
-evenly distributed.
+Phase 1 passed 51 unit tests, a per-task review each, and a whole-branch review
+on the most capable model available. Then it crashed a Kindle to the launcher
+the first time a module was tapped, because the painted object was a bare table
+rather than a `Widget` — see the section above.
 
-What remains unverified is anything that only happens *inside* KOReader:
-`gridwidget.lua`'s `paintTo` against a real blitbuffer, `db.lua`'s SQLite access
-through KOReader's own bindings, and whether the five greys are distinguishable
-on the actual panel. Those cannot be tested off-device and have never run.
+Every layer of review had verified `paintTo`'s arithmetic cell by cell and
+found it correct. It was correct. Nobody asked whether the thing doing the
+painting was a widget at all, because the plan asserted it was and the reviews
+checked the code against the plan.
 
-## macOS writes sidecar files onto e-reader filesystems
+Two smaller things only the hardware showed: macOS AppleDouble sidecars landing
+in the scanner's path, and module titles that are indistinguishable from
+bookshelf's own in a crowded picker (issue #1).
 
-Copying to the FAT/exFAT volume a Kindle exposes creates AppleDouble `._name`
-files. Two of them end in `.lua` and land exactly where bookshelf's scanner
-looks. `tools/install.sh` strips them; anything else that writes modules to a
-device from macOS must do the same.
+The lesson is not "test more". It is that a premise stated confidently in a
+plan propagates through every review that trusts it, and the only thing that
+does not trust it is the device.
+
+## Verified on device
+
+Both modules install, load, appear in bookshelf's picker, and draw their grids
+inside KOReader on a Kindle. The pipeline was also run end to end against a
+real `statistics.sqlite3` (10 books, 696 page-session rows): all five intensity
+levels used, quartiles evenly distributed.

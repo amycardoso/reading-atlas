@@ -7,12 +7,10 @@ Bookshelf already gives you a home screen worth looking at. Reading Atlas adds
 panels to it that show *your reading*: when you read, how much, and — later —
 what you read.
 
-> **Status: phase 1 installed on a real device; rendering not yet seen.**
-> `atlas_heatmap` and `atlas_clock` install cleanly onto a Kindle over USB, and
-> the whole pipeline has been run against a real `statistics.sqlite3` — the
-> heatmap and clock both produce sensible grids from real reading history.
-> What nobody has watched yet is them drawing *inside KOReader* on e-ink.
-> Install with `sh tools/install.sh <koreader-settings-dir>`.
+> **Status: phase 1 works on a real device.** `atlas_heatmap` and `atlas_clock`
+> install, load, and draw inside KOReader on a Kindle. Install with
+> `sh tools/install.sh <koreader-settings-dir>`, restart KOReader, then add them
+> from bookshelf's module picker.
 
 ## What it will have
 
