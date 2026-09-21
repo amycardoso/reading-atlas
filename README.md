@@ -7,20 +7,21 @@ Bookshelf already gives you a home screen worth looking at. Reading Atlas adds
 panels to it that show *your reading*: when you read, how much, and — later —
 what you read.
 
-> **Status: phase 1 works on a real device.** `atlas_heatmap` and `atlas_clock`
-> install, load, and draw inside KOReader on a Kindle. Install with
-> `sh tools/install.sh <koreader-settings-dir>`, restart KOReader, then add them
-> from bookshelf's module picker.
+> **Status: phase 1 works on a real device.** Both modules install, load, and
+> draw inside KOReader on a Kindle. Install with
+> `sh tools/install.sh <koreader-settings-dir>`, restart KOReader, then add
+> **Atlas year** and **Atlas hours** from bookshelf's module picker.
 
 ## What it will have
 
 **Phase 1 — local, offline, no network**
 
-- **`atlas_heatmap`** — a year of reading as a grid of days, GitHub-style.
+- **Atlas year** (`atlas_heatmap`) — a year of reading as a grid of days.
   Intensity is time read, bucketed into five steps by quartile of your own
   history, so a twenty-minute-a-day reader and a three-hour-a-day reader each
   see the shape of their own year.
-- **`atlas_clock`** — an hour × weekday grid. Answers "when do I actually read?"
+- **Atlas hours** (`atlas_clock`) — an hour × weekday grid. Answers "when do I
+  actually read?"
 
 **Later** — the reading map: your library as territory (language, author,
 series), then as geography (country, genre), each in its own design document.
@@ -43,21 +44,15 @@ The trade-off is coupling: these modules `require` bookshelf's module kit, so a
 change to its contract is felt here. That is a deliberate choice in favour of
 iteration speed.
 
-## Prior art
+## Where this is going
 
-This project stands next to, not against, work that already exists and is good:
+Phase 1 covers the axis of *when* you read: a year of days, and an hour ×
+weekday grid. Phase 2 turns to the axis of *what* — the reading map: your
+library as territory, by language, author and series, and later by geography.
 
-- [`readinginsights.koplugin`](https://github.com/peterboda236/readinginsights.koplugin)
-  — streaks, records, achievements, heatmap, on-device.
-- [KoInsight](https://github.com/Ko-Insight/KoInsight) — self-hosted web
-  dashboard for KOReader stats.
-- [KoShelf](https://github.com/paviro/KoShelf) — highlights and notes as a
-  reading dashboard.
-
-If you want reading statistics today, install those. Phase 1 of Reading Atlas
-covers the same axis they do — *when* you read — and covers it well. Where
-this project is going is the axis they leave open: the reading map — language,
-author, series, and later geography — the *what*, not the *when*.
+That second axis is the reason this project exists. It needs metadata the
+statistics database does not carry, so it gets its own design document rather
+than being bolted onto phase 1.
 
 ## License
 

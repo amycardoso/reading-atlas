@@ -150,9 +150,9 @@ acende as estantes por gênero do bookshelf automaticamente.
 
 ### Fora de escopo
 
-- Reescrever ou competir com o `readinginsights.koplugin`, que já cobre bem
-  streaks, recordes e achievements.
-- Dashboard web (já existe: KoInsight, KoShelf, Kodashboard).
+- Streaks, recordes e achievements. O eixo temporal já é bem servido no
+  ecossistema; este projeto entra por outro lado.
+- Dashboard web.
 - Escrever no banco de estatísticas.
 - Card SVG exportável para README. Ideia viva, fase posterior.
 
