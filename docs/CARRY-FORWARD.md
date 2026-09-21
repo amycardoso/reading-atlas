@@ -89,7 +89,14 @@ does not trust it is the device.
 
 ## Verified on device
 
-Both modules install, load, appear in bookshelf's picker, and draw their grids
-inside KOReader on a Kindle. The pipeline was also run end to end against a
+Both modules install, load, appear in bookshelf's picker, and draw their full
+cards -- heading, column labels, grid and context line -- inside KOReader on a
+Kindle Paperwhite 3. All twelve month labels fit at that card width, and the
+five grey steps are clearly distinguishable on the panel.
+
+Three rounds of photographs found three things no test could: the crash, a
+context line clipped off the bottom because the label strip was not taken out
+of the height budget, and month labels dropped irregularly. Each was invisible
+locally and obvious on screen. The pipeline was also run end to end against a
 real `statistics.sqlite3` (10 books, 696 page-session rows): all five intensity
 levels used, quartiles evenly distributed.
