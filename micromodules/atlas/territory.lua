@@ -61,7 +61,21 @@ function M.prepare(lib, axis, unassigned_name)
         if axis == "series" then
             excluded = #unassigned
         else
-            list[#list + 1] = { name = unassigned_name, books = unassigned }
+            -- Bookshelf may already have a real territory under this same
+            -- name (its own "Unknown" language group, say) -- fold the
+            -- unassigned books into it rather than drawing a duplicate.
+            local into
+            for _, t in ipairs(list) do
+                if t.name == unassigned_name then into = t; break end
+            end
+            if into then
+                local merged = {}
+                for i, b in ipairs(into.books) do merged[i] = b end
+                for _, b in ipairs(unassigned) do merged[#merged + 1] = b end
+                into.books = merged
+            else
+                list[#list + 1] = { name = unassigned_name, books = unassigned }
+            end
         end
     end
 

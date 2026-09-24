@@ -112,6 +112,21 @@ t.test("unassigned books become their own territory on most axes", function()
     eq(p.no_values, false)
 end)
 
+t.test("unassigned books merge into a real territory sharing its name", function()
+    -- Bookshelf already names its unknown-language group "Unknown"; books
+    -- that escape even that grouping come back as `unassigned`, and prepare
+    -- must not draw a second "Unknown" territory for them.
+    local p = T.prepare({
+        territories = { { name = "Unknown", books = books(2, "reading", "k") } },
+        unassigned = books(3, nil, "u"),
+    }, "language", "Unknown")
+    local names = {}
+    for _, t in ipairs(p.territories) do names[#names + 1] = t.name end
+    eq(names, { "Unknown" }, "one Unknown territory, not two")
+    eq(#p.territories[1].levels, 5, "the merged books are drawn there too")
+    eq(p.books, 5)
+end)
+
 t.test("on the series axis unassigned books are left out and counted", function()
     local p = T.prepare({
         territories = { { name = "Discworld", books = books(2, "finished", "d") } },
