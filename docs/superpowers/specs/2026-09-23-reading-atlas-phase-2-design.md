@@ -170,7 +170,9 @@ só — ver **Estados**.
 - Cabeçalho: `Atlas map · <eixo>`. O eixo sempre aparece, porque com duas
   instâncias na home é preciso saber qual é qual.
 - Contexto: `<livros> books · <terminados> finished · <territórios> <eixo>`.
-  A contagem de territórios é a real, incluindo os dobrados em "Others".
+  A contagem conta só territórios reais — os que vieram do bookshelf com
+  livros, incluindo os dobrados em "Others" —, nunca o território-pseudônimo
+  montado a partir dos livros sem valor no eixo ("No author", "No genre").
 
 Todos os textos passam por `_()` do bookshelf, como na fase 1. Os exemplos
 acima são as chaves em inglês.

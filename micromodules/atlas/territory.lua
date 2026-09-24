@@ -42,7 +42,9 @@ local function darkestFirst(a, b) return a > b end
 --   territories = { { name, levels = { 4, 4, 2, 0, ... } } }, largest first,
 --   books       = distinct books on the map (a two-author book counts once),
 --   finished    = distinct finished books on the map,
---   count       = territories on the map, before any folding into "Others",
+--   count       = real territories only -- the ones bookshelf grouped, before
+--                 any folding into "Others" -- never the pseudo-territory
+--                 built from unassigned books ("No author", "No genre"),
 --   excluded    = series only: books left out for having no series,
 --   no_values   = true when books exist but none has a value on this axis,
 -- }
@@ -105,7 +107,12 @@ function M.prepare(lib, axis, unassigned_name)
         territories = out,
         books = books,
         finished = finished,
-        count = #out,
+        -- Real territories only: the pseudo-territory built from unassigned
+        -- books ("No author", "No genre") is drawn but not counted, or the
+        -- context line could say "12 authors" when one of them is "No
+        -- author". A same-named real territory the unassigned books merged
+        -- into above was already counted once, in `real`.
+        count = real,
         excluded = excluded,
         no_values = real == 0 and (#unassigned > 0),
     }

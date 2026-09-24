@@ -105,11 +105,24 @@ t.test("unassigned books become their own territory on most axes", function()
         territories = { { name = "Fantasy", books = books(1, "finished", "f") } },
         unassigned = books(3, nil, "u"),
     }, "genre", "No genre")
-    eq(p.count, 2)
+    eq(p.count, 1, "the pseudo-territory built from unassigned books is not counted")
     eq(p.territories[1].name, "No genre", "the largest territory comes first")
     eq(p.books, 4)
     eq(p.excluded, 0)
     eq(p.no_values, false)
+end)
+
+t.test("count is the real territories only, not the unassigned pseudo-territory", function()
+    -- "12 authors" would be wrong if one of those twelve were "No author".
+    local p = T.prepare({
+        territories = {
+            { name = "Gaiman", books = books(2, "finished", "g") },
+            { name = "Pratchett", books = books(3, "reading", "p") },
+        },
+        unassigned = books(5, nil, "u"),
+    }, "author", "No author")
+    eq(p.count, 2, "only Gaiman and Pratchett are real territories")
+    eq(#p.territories, 3, "the map still draws No author as a block")
 end)
 
 t.test("unassigned books merge into a real territory sharing its name", function()
