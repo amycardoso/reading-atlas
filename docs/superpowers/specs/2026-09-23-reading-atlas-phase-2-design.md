@@ -145,14 +145,22 @@ testável sem o KOReader.
 
 ### Livros sem o atributo
 
+No bookshelf, um livro sem autor, sem gênero ou sem série **não entra em grupo
+nenhum** — só o eixo idioma tem o grupo "Unknown". Por isso `library.lua`
+compara os grupos com `Repo.getAllFilepaths()` e devolve à parte os livros
+que não estão em grupo algum (`unassigned`).
+
 - **Idioma:** o bookshelf já os agrupa em "Unknown"; entram como território.
-- **Autor:** idem, se houver.
-- **Gênero:** entram num território "No genre". Se **nenhum** livro tiver
-  gênero, o card mostra o estado *Nenhum livro com gênero* em vez de um mapa
-  de um território só.
+  Se algum escapar mesmo assim, entra num território "Unknown".
+- **Autor:** entram num território "No author".
+- **Gênero:** entram num território "No genre".
 - **Série:** os livros sem série **ficam de fora** — esse território seria o
   maior de todos e engoliria o mapa. A linha de contexto avisa:
   `· 41 not in a series`.
+
+Se **nenhum** livro tiver o atributo (nenhum grupo real, só `unassigned`), o
+card mostra o estado *sem valores* do eixo em vez de um mapa de um território
+só — ver **Estados**.
 
 ### Cabeçalho e linha de contexto
 
@@ -174,8 +182,14 @@ Três, nunca confundidos, como na fase 1:
 | indisponível | `Repo` ausente, função ausente, ou erro | `valueCard` "Unavailable" / "Update bookshelf" |
 | biblioteca vazia | consulta ok, zero livros no eixo | `valueCard` "No books" |
 
-Mais um específico do eixo gênero: *No genres* / "None of your books carry a
-genre tag."
+Mais um, *sem valores*, quando há livros mas nenhum grupo real no eixo:
+
+| Eixo | Valor | Sub-texto |
+|---|---|---|
+| idioma | "No languages" | "None of your books declare a language." |
+| autor | "No authors" | "None of your books name an author." |
+| série | "No series" | "None of your books belong to a series." |
+| gênero | "No genres" | "None of your books carry a genre tag." |
 
 O preview do picker (`ctx.preview`) usa os dados em cache se houver, ou
 "Reading…". Nunca dados falsos.
@@ -194,11 +208,20 @@ Repo.readProgress(fp)            (I/O, pcall)          (lógica pura)           
 
 ### `atlas/library.lua` (novo; só verificável no aparelho)
 
-`library.territories(axis)` → `{ { name = "Portuguese", statuses = { "finished", "reading", … } }, … }`
+`library.territories(axis)` →
+
+```lua
+{
+  territories = { { name = "Portuguese", books = { { path = "/…", status = "finished" }, … } }, … },
+  unassigned  = { { path = "/…", status = nil }, … },  -- em nenhum grupo
+}
+```
+
 ou `nil` quando o `Repo` não responde.
 
 - `require("lib/bookshelf_book_repository")` dentro de `pcall`.
 - Checa que `Repo.getGroupFilepaths` e `Repo.readProgress` existem.
+  `Repo.getAllFilepaths` é opcional: sem ela, `unassigned` vem vazio.
 - Um `readProgress` que falha num arquivo vale "não lido" para aquele livro;
   não derruba a consulta.
 - Um livro pode aparecer em mais de um território (vários autores ou gêneros).
