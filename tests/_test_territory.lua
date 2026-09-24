@@ -142,4 +142,164 @@ t.test("a territory with no books is dropped", function()
     eq(p.count, 1)
 end)
 
+-- ── plan ───────────────────────────────────────────────────────────────────
+
+t.test("the row count giving the largest cell wins", function()
+    -- Four books in 100x100. One row: 4 columns, cell 22. Two rows: 2x2,
+    -- cell 45. Three rows: 2 columns, 3 rows, cell 29. Four rows: cell 22.
+    local p = plan({ territory("English", 4, "reading") }, 100, 100)
+    eq(p.rows, 2)
+    eq(p.cols, 2)
+    eq(p.geom.cell, 45)
+end)
+
+t.test("books fill each column top to bottom, darkest first", function()
+    local p = plan({ { name = "English", levels = { 4, 2, 1, 0 } } }, 100, 100)
+    eq(p.cells[1][1], 4)
+    eq(p.cells[1][2], 2)
+    eq(p.cells[2][1], 1)
+    eq(p.cells[2][2], 0)
+end)
+
+t.test("a blank column separates two territories", function()
+    local p = plan({ territory("English", 4, "finished"),
+                     territory("French", 4, "reading") }, 400, 100)
+    local span = math.ceil(4 / p.rows)
+    eq(p.cells[span + 1], nil, "the border column must be blank")
+    eq(p.cells[span + 2][1], 2, "the second territory starts after it")
+    eq(p.labels[2].col, span + 2)
+end)
+
+t.test("the end of a territory's last column stays blank", function()
+    -- Three books in two rows: the last column holds one book and one blank.
+    local p = T.plan{ territories = { territory("English", 3, "finished") },
+        width = 60, height = 60, measure = measure, min_label = MIN,
+        others_label = OTHERS, grid = Grid }
+    eq(p.rows, 2)
+    eq(p.cells[2][1], 4)
+    eq(p.cells[2][2], nil, "no book there, so no cell")
+end)
+
+t.test("every book is drawn exactly once", function()
+    local ts = {}
+    for i = 1, 12 do ts[i] = territory("T" .. i, 25 - i, "reading") end
+    local total = 0
+    for i = 1, 12 do total = total + (25 - i) end
+    local p = plan(ts, 500, 120)
+    eq(countCells(p), total)
+end)
+
+t.test("a territory too narrow to name is folded into Others", function()
+    -- One big territory and thirty single books in a narrow card: the singles
+    -- cannot each hold "abc", so most of them must fold.
+    local ts = { territory("Big", 40, "finished") }
+    for i = 1, 30 do ts[#ts + 1] = territory(("S%02d"):format(i), 1, "reading") end
+    local p = plan(ts, 200, 60)
+    assert(p.shown < #ts, "expected folding, showed all " .. p.shown)
+    assert(p.shown >= 1, "the big territory must survive")
+    eq(p.labels[1].text, "Big")
+    eq(countCells(p), 70, "folded books are still drawn, inside Others")
+end)
+
+t.test("every territory shown keeps a label at least min_label wide", function()
+    local minw = measure(MIN)
+    for width = 80, 600, 7 do
+        local ts = {}
+        for i = 1, 20 do ts[i] = territory("T" .. i, 21 - i, "reading") end
+        local p = plan(ts, width, 90)
+        local named = 0
+        for _, lb in ipairs(p.labels) do
+            if lb.text ~= OTHERS then
+                named = named + 1
+                assert(lb.width >= minw, ("width %d: label %s has %d px"):format(
+                    width, lb.text, lb.width))
+            end
+        end
+        eq(named, p.shown, "width " .. width .. ": every shown territory is named")
+    end
+end)
+
+t.test("labels never run into the next territory", function()
+    for width = 80, 600, 7 do
+        local ts = {}
+        for i = 1, 20 do ts[i] = territory("T" .. i, 21 - i, "reading") end
+        local p = plan(ts, width, 90)
+        local step = p.geom.cell + p.geom.gap
+        for i = 2, #p.labels do
+            local prev = p.labels[i - 1]
+            local prev_end = (prev.col - 1) * step + prev.width
+            local this_x = (p.labels[i].col - 1) * step
+            assert(prev_end < this_x, ("width %d: label %d ends at %d, next starts at %d")
+                :format(width, i - 1, prev_end, this_x))
+        end
+    end
+end)
+
+t.test("the grid never overflows its box across a realistic range", function()
+    for width = 100, 700, 13 do
+        for _, height in ipairs({ 40, 90, 160 }) do
+            local ts = {}
+            for i = 1, 8 do ts[i] = territory("T" .. i, 40 - 4 * i, "reading") end
+            local p = plan(ts, width, height)
+            assert(p.geom.w <= width, ("%dx%d: width %d"):format(width, height, p.geom.w))
+            assert(p.geom.h <= height, ("%dx%d: height %d"):format(width, height, p.geom.h))
+        end
+    end
+end)
+
+t.test("no cell lands outside the planned columns and rows", function()
+    local ts = {}
+    for i = 1, 6 do ts[i] = territory("T" .. i, 7 * i, "reading") end
+    local p = plan(ts, 300, 80)
+    for col, rows in pairs(p.cells) do
+        assert(col >= 1 and col <= p.cols, "column " .. col .. " out of range")
+        for row in pairs(rows) do
+            assert(row >= 1 and row <= p.rows, "row " .. row .. " out of range")
+        end
+    end
+end)
+
+t.test("a single territory in a card too small to name it still draws", function()
+    local p = plan({ territory("Portuguese", 10, "finished") }, 10, 10)
+    eq(countCells(p), 10, "every book still has a cell")
+end)
+
+t.test("three hundred books in sixty small territories still all draw, inside the box", function()
+    -- No territory here is wide enough to name in 260 px, so the honest
+    -- answer is one "Others" block -- but every book must still have a cell.
+    local ts, total = {}, 0
+    for i = 1, 60 do
+        ts[i] = territory("A" .. i, (i % 9) + 1, "reading")
+        total = total + (i % 9) + 1
+    end
+    local p = plan(ts, 260, 70)
+    eq(countCells(p), total)
+    assert(p.geom.w <= 260 and p.geom.h <= 70, "the grid must stay inside the card")
+end)
+
+t.test("the search names as many territories as brute force would", function()
+    -- plan() binary-searches the number of named territories, which assumes
+    -- that folding one more territory never makes naming the rest harder.
+    -- Check that assumption against trying every count, on random libraries.
+    local minw = measure(MIN)
+    math.randomseed(7)
+    for _ = 1, 300 do
+        local ts = {}
+        for i = 1, math.random(1, 40) do
+            local lv = {}
+            for j = 1, math.random(1, 30) do lv[j] = math.random(0, 4) end
+            ts[i] = { name = "T" .. i, levels = lv }
+        end
+        table.sort(ts, function(a, b) return #a.levels > #b.levels end)
+        local o = { territories = ts, width = math.random(80, 700),
+            height = math.random(30, 200), measure = measure, min_label = MIN,
+            others_label = OTHERS, grid = Grid }
+        local brute = 0
+        for keep = 0, #ts do
+            if T._solve(o, keep, minw) then brute = keep end
+        end
+        eq(T.plan(o).shown, brute, ("%d territories in %dx%d"):format(#ts, o.width, o.height))
+    end
+end)
+
 t.done()
