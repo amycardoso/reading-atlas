@@ -5,7 +5,10 @@
 -- needed -- every cell is a rectangle.
 --
 -- The caller supplies level(col, row) -> 0..4 rather than a data table, so
--- this one widget paints both the day heatmap and the hour x weekday clock.
+-- this one widget paints the day heatmap, the hour x weekday clock and the
+-- territory map. level() returning nil means "no cell here" and paints
+-- nothing: the map needs blank columns between territories that must not read
+-- as an unread book.
 local Geom = require("ui/geometry")
 local Blitbuffer = require("ffi/blitbuffer")
 -- MUST extend KOReader's Widget. A bare table with getSize/paintTo looks like
@@ -40,18 +43,25 @@ end
 
 local GridWidget = Widget:extend{}
 
+-- Height of a label strip set in `face`. A module function as well as a
+-- method, so a caller can take the strip out of its height budget BEFORE
+-- building the widget -- the territory map has to solve its layout against
+-- exactly the grid height the widget will end up with.
+function M.labelHeight(face)
+    local TextWidget = require("ui/widget/textwidget")
+    local probe = TextWidget:new{ text = "M", face = face }
+    local h = probe:getSize().h
+    probe:free()
+    return h + math.max(1, math.floor(h / 4))
+end
+
 -- Height the column-label strip occupies, 0 when there are no labels.
 -- Deliberately independent of the grid geometry: the strip is measured BEFORE
 -- the grid is solved, because it comes out of the same height budget and the
 -- grid only gets what is left.
 function GridWidget:labelHeight()
     if not (self.col_labels and self.face) then return 0 end
-    if self._label_h then return self._label_h end
-    local TextWidget = require("ui/widget/textwidget")
-    local probe = TextWidget:new{ text = "M", face = self.face }
-    local h = probe:getSize().h
-    probe:free()
-    self._label_h = h + math.max(1, math.floor(h / 4))
+    if not self._label_h then self._label_h = M.labelHeight(self.face) end
     return self._label_h
 end
 
@@ -116,18 +126,42 @@ function GridWidget:paintLabels(bb, x, y)
     end
 end
 
+-- Truncate mode: every label is drawn, each cut with an ellipsis to the
+-- `width` the caller gave it. For the territory map, where a skipped label
+-- would leave a region with no name -- a missing month can be inferred from
+-- its neighbours, a missing language cannot.
+function GridWidget:paintTruncatedLabels(bb, x, y)
+    local TextWidget = require("ui/widget/textwidget")
+    local step = self.geom.cell + self.geom.gap
+    for i = 1, #self.col_labels do
+        local lb = self.col_labels[i]
+        local tw = TextWidget:new{ text = lb.text, face = self.face,
+            fgcolor = self.label_color, max_width = lb.width }
+        tw:paintTo(bb, x + (lb.col - 1) * step, y)
+        tw:free()
+    end
+end
+
 function GridWidget:paintTo(bb, x, y)
     local g = self.geom
     local lh = self:labelHeight()
     self.dimen = Geom:new{ x = x, y = y, w = g.w, h = g.h + lh }
-    if lh > 0 then self:paintLabels(bb, x, y) end
+    if lh > 0 then
+        if self.label_mode == "truncate" then
+            self:paintTruncatedLabels(bb, x, y)
+        else
+            self:paintLabels(bb, x, y)
+        end
+    end
     y = y + lh
     local step = g.cell + g.gap
     for col = 1, self.cols do
         for row = 1, self.rows do
-            local lv = self.level(col, row) or 0
-            bb:paintRect(x + (col - 1) * step, y + (row - 1) * step,
-                g.cell, g.cell, Blitbuffer.Color8(M.INK[lv] or M.INK[0]))
+            local lv = self.level(col, row)
+            if lv ~= nil then
+                bb:paintRect(x + (col - 1) * step, y + (row - 1) * step,
+                    g.cell, g.cell, Blitbuffer.Color8(M.INK[lv] or M.INK[0]))
+            end
         end
     end
 end
@@ -144,6 +178,7 @@ function M.new(opts)
         col_labels  = opts.col_labels,
         face        = opts.face,
         label_color = opts.label_color,
+        label_mode  = opts.label_mode,
     }
 end
 
