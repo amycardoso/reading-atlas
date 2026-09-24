@@ -234,9 +234,14 @@ atravessa esta camada (ver `CARRY-FORWARD.md`).
 ### `atlas/territory.lua` (novo; lógica pura, onde mora o teste)
 
 - `territory.level(status)` → `0 | 1 | 2 | 4`.
-- `territory.plan{ territories, width, height, measure, gap_ratio, grid }` →
-  `{ rows, cols, cells = { [col] = { [row] = level|nil } }, labels = { { col, text } }, others = n }`.
-- `territory.summary(territories, axis)` → contagens para a linha de contexto.
+- `territory.prepare(lib, axis, unassigned_name)` → territórios ordenados com
+  seus degraus, mais as contagens da linha de contexto (`books`, `finished`,
+  `count`, `excluded`) e o sinal `no_values`.
+- `territory.plan{ territories, width, height, measure, min_label, others_label, grid, gap_ratio }` →
+  `{ rows, cols, geom, cells = { [col] = { [row] = level } }, labels = { { col, text, width } }, shown = n }`.
+  Uma célula ausente é em branco. O número de territórios nomeados é achado por
+  busca binária — o render roda na CPU de um e-reader — e um teste confere o
+  resultado contra força bruta.
 
 ### `atlas/source.lua` (alterado)
 
