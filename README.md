@@ -97,7 +97,7 @@ iteration speed.
 ## Development
 
 ```sh
-sh tests/run.sh          # 10 suites, 114 tests
+sh tests/run.sh          # 10 suites, 126 tests
 LUA=luajit sh tests/run.sh
 ```
 
