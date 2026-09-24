@@ -108,8 +108,12 @@ a laptop and then fail on the device.
 
 All the logic worth asserting — bucketing, the quartile scale, the calendar
 mapping, grid geometry, the three-state cache — is pure and tested here. The
-SQLite access, the blitbuffer painting and the two module files cannot be
-tested off-device and are verified on real hardware instead.
+SQLite access, the blitbuffer painting and the atlas_heatmap/atlas_clock
+module files cannot be tested off-device and are verified on real hardware
+instead. atlas_map.lua is exercised off-device against stubs too, and its
+bookshelf repository access against a fake repository, but the map's painting
+and the real repository still need the device — see
+[`docs/CARRY-FORWARD.md`](docs/CARRY-FORWARD.md) for what's left to verify.
 
 [`docs/CARRY-FORWARD.md`](docs/CARRY-FORWARD.md) collects what the device
 taught that no test could, including the one that crashed a Kindle.
