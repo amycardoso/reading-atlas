@@ -153,4 +153,26 @@ t.test("with a custom accept, nil still resolves to false", function()
     eq(Source.getKeyed("map:series", nil, d.deps), false)
 end)
 
+-- ── peek ─────────────────────────────────────────────────────────────────
+-- The Add picker renders every module's preview cold: peek must answer
+-- straight from whatever is cached, without ever scheduling a query.
+
+t.test("peek on an unknown key is nil and schedules nothing", function()
+    Source.reset()
+    eq(Source.peek("map:language"), nil)
+end)
+
+t.test("peek returns the settled value after a query lands", function()
+    Source.reset()
+    local rows = { territories = {}, unassigned = {} }
+    local d = makeDeps(function() return rows end)
+    d.deps.accept = function(r) return r ~= nil end
+    eq(Source.peek("map:genre"), nil, "nothing queried yet")
+    Source.getKeyed("map:genre", nil, d.deps)
+    eq(Source.peek("map:genre"), nil, "still loading, no query has run")
+    eq(d.pendingCount(), 1, "getKeyed itself scheduled the query, not peek")
+    d.run()
+    eq(Source.peek("map:genre"), rows)
+end)
+
 t.done()

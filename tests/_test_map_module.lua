@@ -211,4 +211,26 @@ t.test("settings without a config do nothing rather than raise", function()
     Map.show_settings(c)
 end)
 
+-- ── preview (Add picker) ───────────────────────────────────────────────────
+-- The picker renders every module's preview cold; it must never be what
+-- starts the whole-library walk.
+
+t.test("a preview render with no cache is the loading card and touches nothing", function()
+    Source.reset()
+    scheduled = {}
+    library_axis = nil
+    local card = Map.render(ctx{ preview = true })
+    eq(card.value, "Reading…")
+    eq(library_axis, nil, "the library must not be read from a preview")
+    eq(#scheduled, 0, "a preview must never schedule a query")
+end)
+
+t.test("a preview render after a normal render has settled shows the map", function()
+    library_answer = lib({ { name = "English", books = { book("/a", "reading") } } })
+    settle(ctx())
+    local card = Map.render(ctx{ preview = true })
+    eq(card.card, nil, "must not be a valueCard once the cache is warm")
+    eq(card[1].text, "Atlas map · Languages")
+end)
+
 t.done()

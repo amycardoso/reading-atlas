@@ -88,4 +88,13 @@ function M.get(refresh, deps)
     return M.getKeyed("hours", refresh, deps or hourDeps())
 end
 
+-- Read-only: a preview render (the Add picker draws every module's card
+-- cold) must be able to show whatever is already cached without ever
+-- scheduling a query of its own. Unlike getKeyed, a key peek() has not seen
+-- yet stays nil forever -- peeking never starts the guard.
+function M.peek(key)
+    local s = _state[key]
+    return s and s.cache
+end
+
 return M

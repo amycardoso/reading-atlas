@@ -92,7 +92,18 @@ local function render(ctx)
     local A = AXIS[axis]
     local heading_text = _("Atlas map") .. " · " .. A.title
 
-    local lib = fetch(axis, refresh)
+    -- The Add picker renders every module's preview to fill the list; it
+    -- must never be what starts the whole-library walk. peek() answers from
+    -- whatever is already cached (nil, false or the data) and schedules
+    -- nothing, so a cold preview always shows "Reading…". peek() can itself
+    -- answer false, so this cannot be the usual `and/or` one-liner -- that
+    -- would fall through to fetch() and schedule a query anyway.
+    local lib
+    if ctx.preview then
+        lib = atlas("source").peek("map:" .. axis)
+    else
+        lib = fetch(axis, refresh)
+    end
     if lib == nil then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
             heading = heading_text, value = _("Reading…") }
