@@ -160,6 +160,21 @@ t.test("with data, the card is heading, grid and context line", function()
     eq(grid.level(1, 1), 4, "English's finished book comes first")
 end)
 
+t.test("a tiny ctx.height never collapses the grid below 20 px plus labels", function()
+    -- chrome (heading + sub + the span between) already eats more than a
+    -- height this small, so a floor that ignores the label strip leaves
+    -- grid_h at 1-2 px: one row and a map far wider than the card.
+    library_answer = lib({ { name = "English", books = { book("/a", "reading") } } })
+    local card = settle(ctx{ height = 5 })
+    local grid = card[3]
+    assert(grid.level, "the middle child should be the grid widget")
+    -- The stubbed TextWidget used to measure the label strip is 10 px tall,
+    -- so labelHeight() is 10 + floor(10/4) = 12; the grid widget's own
+    -- height must never be floored below sc(20) + that strip.
+    assert(grid.height >= 20 + 12,
+        ("grid height %s should be at least 32"):format(tostring(grid.height)))
+end)
+
 t.test("the series axis says how many books were left out", function()
     library_answer = lib({ { name = "Discworld", books = { book("/a", "finished") } } },
         { book("/x"), book("/y") })

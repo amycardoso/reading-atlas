@@ -148,15 +148,21 @@ local function render(ctx)
         fgcolor = Kit.COLOR_MUTED, max_width = width }
 
     local chrome = heading:getSize().h + sub:getSize().h + sc(6)
-    local avail = ctx.height and math.max(sc(20), ctx.height - chrome)
-        or math.floor(width / 3)
 
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
+    -- The label strip has to come out of avail's floor too: flooring at
+    -- sc(20) alone left room for the strip only by accident, and a tiny
+    -- ctx.height could floor avail at exactly sc(20), leaving grid_h at
+    -- 1-2 px once the strip was subtracted -- one row and a map far wider
+    -- than the card.
+    local label_h = GW.labelHeight(sface)
+    local avail = ctx.height and math.max(sc(20) + label_h, ctx.height - chrome)
+        or math.floor(width / 3)
     -- The plan must be solved against exactly the grid height the widget
     -- will end up with, or the two disagree about the cell size and the
     -- labels land on the wrong columns.
-    local grid_h = math.max(1, avail - GW.labelHeight(sface))
+    local grid_h = math.max(sc(20), avail - label_h)
     local function measure(text)
         local tw = TextWidget:new{ text = text, face = sface }
         local w = tw:getSize().w
