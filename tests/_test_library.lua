@@ -23,6 +23,7 @@ local function fakeRepo(o)
             if path == "/b/a.epub" then return 1.0, "finished" end
             return nil, nil
         end,
+        progressFor = o.progressFor,
         getAllFilepaths = o.getAllFilepaths,
     }
 end
@@ -55,6 +56,61 @@ t.test("a repository without readProgress is unavailable", function()
     local repo = fakeRepo()
     repo.readProgress = nil
     eq(Library.territories("language", repo), nil)
+end)
+
+t.test("progressFor is preferred over readProgress when both exist", function()
+    local read_calls = 0
+    local repo = fakeRepo{
+        readProgress = function(path)
+            read_calls = read_calls + 1
+            return 1.0, "finished"
+        end,
+        progressFor = function(path)
+            if path == "/b/a.epub" then return 1.0, "reading" end
+            return nil, nil
+        end,
+    }
+    local got = byName(Library.territories("language", repo))
+    eq(got.English.books[1].status, "reading", "progressFor's status wins")
+    eq(read_calls, 0, "readProgress must not be called when progressFor exists")
+end)
+
+t.test("without progressFor, readProgress is used as before", function()
+    local repo = fakeRepo{ progressFor = nil }
+    local got = byName(Library.territories("language", repo))
+    eq(got.English.books[1].status, "finished")
+end)
+
+t.test("a repository with progressFor but no readProgress is available", function()
+    local repo = fakeRepo{
+        readProgress = nil,
+        progressFor = function(path)
+            if path == "/b/a.epub" then return 1.0, "finished" end
+            return nil, nil
+        end,
+    }
+    local got = byName(Library.territories("language", repo))
+    eq(got.English.books[1].status, "finished")
+end)
+
+t.test("a repository with neither progressFor nor readProgress is unavailable", function()
+    local repo = fakeRepo()
+    repo.readProgress = nil
+    repo.progressFor = nil
+    eq(Library.territories("language", repo), nil)
+end)
+
+t.test("a progressFor that raises for one file leaves that book unread, rest intact", function()
+    local repo = fakeRepo{
+        progressFor = function(path)
+            if path == "/b/b.epub" then error("sidecar stat failed") end
+            return 1.0, "finished"
+        end,
+    }
+    local got = byName(Library.territories("language", repo))
+    eq(got.English.books[1].status, "finished")
+    eq(got.English.books[2].status, nil, "the broken one is unread")
+    eq(got.Portuguese.books[1].status, "finished", "the rest are intact")
 end)
 
 t.test("a group API that raises is unavailable", function()

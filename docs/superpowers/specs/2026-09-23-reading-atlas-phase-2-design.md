@@ -31,9 +31,12 @@ O spec de 2026-09-20 previa a fase 2 sobre a tabela `book` do
    - A normalização já vem feita: idioma canônico com nome legível ("pt-BR" e
      "por" viram um grupo só), autor unificado ("Assis, Machado de" = "Machado
      de Assis"), gênero com plural colapsado.
-   - `Repo.readProgress(fp)` devolve o status por livro a partir do sidecar do
+   - `Repo.progressFor(fp)` devolve o status por livro a partir do sidecar do
      KOReader, sem estatísticas, já no vocabulário do bookshelf
-     (`complete` → `finished`, `abandoned` → `on_hold`).
+     (`complete` → `finished`, `abandoned` → `on_hold`); onde ausente, cai para
+     `Repo.readProgress(fp)`, que devolve o mesmo status mas abre a
+     DocSettings mesmo de um livro nunca aberto, em vez de pular a leitura por
+     um stat memoizado.
    - O módulo `shelf_size` do próprio bookshelf chama `Repo` diretamente, então
      isso é uso previsto por um micro-módulo, não um atalho.
 
@@ -202,8 +205,8 @@ mexe na navegação do bookshelf; fica para depois.
 ## Arquitetura
 
 ```
-Repo.getGroupFilepaths(axis) ─► atlas/library.lua ─► atlas/territory.lua ─► atlas/gridwidget.lua
-Repo.readProgress(fp)            (I/O, pcall)          (lógica pura)           (já existe)
+Repo.getGroupFilepaths(axis)      ─► atlas/library.lua ─► atlas/territory.lua ─► atlas/gridwidget.lua
+Repo.progressFor(fp) / readProgress  (I/O, pcall)          (lógica pura)           (já existe)
 ```
 
 ### `atlas/library.lua` (novo; só verificável no aparelho)
@@ -220,10 +223,13 @@ Repo.readProgress(fp)            (I/O, pcall)          (lógica pura)           
 ou `nil` quando o `Repo` não responde.
 
 - `require("lib/bookshelf_book_repository")` dentro de `pcall`.
-- Checa que `Repo.getGroupFilepaths` e `Repo.readProgress` existem.
-  `Repo.getAllFilepaths` é opcional: sem ela, `unassigned` vem vazio.
-- Um `readProgress` que falha num arquivo vale "não lido" para aquele livro;
-  não derruba a consulta.
+- Checa que `Repo.getGroupFilepaths` existe e que pelo menos um entre
+  `Repo.progressFor` e `Repo.readProgress` existe; usa `progressFor` quando
+  presente (pula a leitura de sidecar para um livro nunca aberto) e cai para
+  `readProgress` senão. `Repo.getAllFilepaths` é opcional: sem ela,
+  `unassigned` vem vazio.
+- Um `progressFor`/`readProgress` que falha num arquivo vale "não lido" para
+  aquele livro; não derruba a consulta.
 - Um livro pode aparecer em mais de um território (vários autores ou gêneros).
   Isso é aceito: o mapa conta presenças em territórios. A contagem de
   **livros** na linha de contexto usa caminhos distintos.

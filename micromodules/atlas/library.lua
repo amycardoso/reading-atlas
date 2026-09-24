@@ -24,7 +24,17 @@ end
 
 -- A book whose sidecar cannot be read is unread, not a failed query: one
 -- corrupt .sdr must not blank the whole map.
+--
+-- Repo.progressFor(fp) is preferred over Repo.readProgress(fp): it skips
+-- opening a DocSettings for a never-opened book via a memoised stat, where
+-- readProgress opens one regardless. Both return the same status as their
+-- second value, so callers never see a difference besides speed.
 local function statusOf(repo, path)
+    if type(repo.progressFor) == "function" then
+        local ok, _pct, status = pcall(repo.progressFor, path)
+        if ok then return status end
+        return nil
+    end
     local ok, _pct, status = pcall(repo.readProgress, path)
     if ok then return status end
     return nil
@@ -46,7 +56,7 @@ function M.territories(axis, repo)
     repo = repo or loadRepo()
     if not repo then return nil end
     if type(repo.getGroupFilepaths) ~= "function"
-        or type(repo.readProgress) ~= "function" then
+        or (type(repo.progressFor) ~= "function" and type(repo.readProgress) ~= "function") then
         return nil
     end
 
