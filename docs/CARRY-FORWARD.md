@@ -4,7 +4,7 @@ Things learned while building phase 1 that will cost time — or break on the
 device — if they are forgotten. Kept in the repository because the scratch
 workspace they were discovered in does not survive.
 
-## Reading TEXT columns after closing the database will bite phase 2
+## Reading TEXT columns after closing the database will bite phase 3
 
 Phase 1's query selects only integers, and `micromodules/atlas/db.lua` builds
 its rows **after** `conn:close()`. That is safe *only because the columns are
@@ -15,9 +15,12 @@ and FLOAT columns into independent Lua values, but a TEXT or BLOB column comes
 back as a pointer wrapper that is **not** copied. Reading one after the
 connection closes is undefined behaviour.
 
-Phase 2's territorial map wants `title`, `authors`, `language` and `series` —
-all TEXT. Those must be read into Lua strings **before** the connection closes,
-or copied explicitly. On an e-reader the failure mode is a crash, which for the
+Phase 2's territorial map ended up reading `title`, `authors`, `language` and
+`series` through bookshelf's own book repository instead, so this did not
+come up. Phase 3, which is expected to add data from elsewhere and may read
+TEXT columns from `statistics.sqlite3` directly, is the one that will hit it:
+those must be read into Lua strings **before** the connection closes, or
+copied explicitly. On an e-reader the failure mode is a crash, which for the
 user means a hard reboot.
 
 ## The host owns size; do not fight it
