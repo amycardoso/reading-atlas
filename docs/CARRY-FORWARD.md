@@ -4,7 +4,7 @@ Things learned while building phase 1 that will cost time — or break on the
 device — if they are forgotten. Kept in the repository because the scratch
 workspace they were discovered in does not survive.
 
-## Reading TEXT columns after closing the database will bite phase 2
+## Reading TEXT columns after closing the database will bite phase 3
 
 Phase 1's query selects only integers, and `micromodules/atlas/db.lua` builds
 its rows **after** `conn:close()`. That is safe *only because the columns are
@@ -15,9 +15,12 @@ and FLOAT columns into independent Lua values, but a TEXT or BLOB column comes
 back as a pointer wrapper that is **not** copied. Reading one after the
 connection closes is undefined behaviour.
 
-Phase 2's territorial map wants `title`, `authors`, `language` and `series` —
-all TEXT. Those must be read into Lua strings **before** the connection closes,
-or copied explicitly. On an e-reader the failure mode is a crash, which for the
+Phase 2's territorial map ended up reading `title`, `authors`, `language` and
+`series` through bookshelf's own book repository instead, so this did not
+come up. Phase 3, which is expected to add data from elsewhere and may read
+TEXT columns from `statistics.sqlite3` directly, is the one that will hit it:
+those must be read into Lua strings **before** the connection closes, or
+copied explicitly. On an e-reader the failure mode is a crash, which for the
 user means a hard reboot.
 
 ## The host owns size; do not fight it
@@ -100,3 +103,38 @@ of the height budget, and month labels dropped irregularly. Each was invisible
 locally and obvious on screen. The pipeline was also run end to end against a
 real `statistics.sqlite3` (10 books, 696 page-session rows): all five intensity
 levels used, quartiles evenly distributed.
+
+## Phase 2: verify on the device before calling it done
+
+`atlas_map` passed every off-device suite. That is exactly where phase 1 stood
+before a Kindle crashed. Nothing below has been seen on a screen yet:
+
+1. The card appears in the picker, and **tapping it does not take KOReader
+   down**.
+2. The four greys are distinguishable, especially on hold (`0xB0`) against
+   unread (`0xE0`).
+3. The blank column reads as a border between territories.
+4. Truncated labels ("Portu…") are legible, and TextWidget really does add the
+   ellipsis at `max_width`.
+5. The first build of bookshelf's groups on a real library does not freeze the
+   menu.
+6. Changing the axis in *Module settings* redraws the card.
+
+And one design consequence to look at with a real library: one cell per book
+means a library of many one-book authors cannot name them at card size. On the
+author axis such a library draws mostly "Others". That is the rule working,
+not a bug in `territory.lua` — but whether it is the right rule is a question
+for the device.
+
+## bookshelf's group API is not a documented contract
+
+`atlas/library.lua` depends on `Repo.getGroupFilepaths`, `Repo.readProgress`
+and `Repo.getAllFilepaths`, checked against bookshelf commit `cbce46e`. They
+are public functions but not part of the micro-module README. If a bookshelf
+update renames one, the card shows "Unavailable" rather than crashing — that
+is what the `pcall`s are for, and `tests/_test_library.lua` holds them to it.
+
+## The library is read once per KOReader session
+
+Like phase 1's statistics, each axis is cached for the life of the process.
+A book finished or added after the first render shows up after a restart.
