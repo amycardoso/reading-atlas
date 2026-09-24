@@ -105,4 +105,52 @@ t.test("an empty rows table resolves to false, not an empty table", function()
         "a statistics database with zero rows is the no-statistics state")
 end)
 
+t.test("separate keys keep separate caches", function()
+    -- A map switched from languages to authors must query again, never be
+    -- answered from the other axis's cache.
+    Source.reset()
+    local d = makeDeps(function() return { "languages" } end)
+    Source.getKeyed("map:language", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("map:language", nil, d.deps)[1], "languages")
+
+    local e = makeDeps(function() return { "authors" } end)
+    eq(Source.getKeyed("map:author", nil, e.deps), nil,
+        "a new key starts in the loading state")
+    e.run()
+    eq(Source.getKeyed("map:author", nil, e.deps)[1], "authors")
+    eq(Source.getKeyed("map:language", nil, d.deps)[1], "languages",
+        "the first key's cache is untouched")
+end)
+
+t.test("the hour rows and a keyed query do not share a guard", function()
+    Source.reset()
+    local d = makeDeps(function() return { { hour = 1, secs = 1 } } end)
+    Source.get(nil, d.deps)
+    Source.getKeyed("map:language", nil, d.deps)
+    eq(d.pendingCount(), 2, "each key schedules its own query")
+end)
+
+t.test("accept decides what is usable: an empty table can be a real answer", function()
+    -- The map distinguishes "the library is empty" (a table) from "bookshelf
+    -- did not answer" (nil). Phase 1's non-empty rule would fold both into
+    -- false, so the map passes its own accept.
+    Source.reset()
+    local d = makeDeps(function() return { territories = {}, unassigned = {} } end)
+    d.deps.accept = function(r) return r ~= nil end
+    Source.getKeyed("map:genre", nil, d.deps)
+    d.run()
+    local got = Source.getKeyed("map:genre", nil, d.deps)
+    assert(type(got) == "table", "an empty library is data, not the false state")
+end)
+
+t.test("with a custom accept, nil still resolves to false", function()
+    Source.reset()
+    local d = makeDeps(function() return nil end)
+    d.deps.accept = function(r) return r ~= nil end
+    Source.getKeyed("map:series", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("map:series", nil, d.deps), false)
+end)
+
 t.done()
