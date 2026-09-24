@@ -151,28 +151,6 @@ local function better(fits, geom, best)
     return geom.cell > best.geom.cell
 end
 
--- Lays the map out.
---
---   territories  = prepare(...).territories
---   width/height = the box for the GRID alone -- the label strip already
---                  taken out (gridwidget.labelHeight)
---   measure      = function(text) -> px width in the label face
---   min_label    = the shortest label worth drawing, e.g. "Mmm…"
---   others_label = "Others"
---   grid         = atlas/grid.lua (injected: tests hand in the real one)
---   gap_ratio    = passed through to grid.layout
---
--- How many territories are shown comes from the space, not a fixed N: a
--- territory stays only if its columns can hold min_label. The smallest
--- territories are folded into "Others" until every one left can be named. For that count, the row count
--- giving the largest cell that fits the box wins; ties go to fewer rows.
---
--- Returns {
---   rows, cols, geom,        -- geom is grid.layout's result for rows x cols
---   cells  = { [col] = { [row] = level } }   -- a missing entry is blank
---   labels = { { col, text, width } },       -- for gridwidget truncate mode
---   shown  = territories drawn under their own name,
--- }
 -- The best layout that names the first `keep` territories, or nil when no
 -- row count gives each of them room for min_label.
 local function solve(o, keep, minw)
@@ -218,6 +196,29 @@ end
 -- Tests only: lets the suite check the binary search against brute force.
 M._solve = solve
 
+-- Lays the map out.
+--
+--   territories  = prepare(...).territories
+--   width/height = the box for the GRID alone -- the label strip already
+--                  taken out (gridwidget.labelHeight)
+--   measure      = function(text) -> px width in the label face
+--   min_label    = the shortest label worth drawing, e.g. "Mmm…"
+--   others_label = "Others"
+--   grid         = atlas/grid.lua (injected: tests hand in the real one)
+--   gap_ratio    = passed through to grid.layout
+--
+-- How many territories are shown comes from the space, not a fixed N: a
+-- territory stays only if its columns can hold min_label. The smallest
+-- territories are folded into "Others" until every one left can be named.
+-- For that count, the row count giving the largest cell that fits the box
+-- wins; ties go to fewer rows.
+--
+-- Returns {
+--   rows, cols, geom,        -- geom is grid.layout's result for rows x cols
+--   cells  = { [col] = { [row] = level } }   -- a missing entry is blank
+--   labels = { { col, text, width } },       -- for gridwidget truncate mode
+--   shown  = territories drawn under their own name,
+-- }
 function M.plan(o)
     local minw = o.measure(o.min_label)
 
