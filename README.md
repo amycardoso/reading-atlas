@@ -56,20 +56,26 @@ outside the plugin — so the modules survive bookshelf updates.
 
 ## Planned
 
-**Phase 3 — the reading map, enriched.** Country — and genre for books that
-carry none — which the statistics database does not carry and which have to
-come from elsewhere. Bookshelf's own Hardcover integration already stores a
-per-book id, and that id is what would make enrichment reliable rather than a
-guess at matching titles.
+**Phase 3 — the book's fingerprint** (`atlas_fingerprint`). One strip per
+recent book, one line per stretch of it, shaded by how long you spent there
+per page: where you got stuck, where you raced, where you went back to re-read,
+where you stopped. It is drawn from the per-page timings in
+`statistics.sqlite3` — the one thing only the device knows, and the one no
+reading app or stats dashboard shows. Design:
+[`docs/superpowers/specs/2026-10-15-reading-atlas-phase-3-design.md`](docs/superpowers/specs/2026-10-15-reading-atlas-phase-3-design.md).
 
-The geographic map will be drawn as a **tile grid** — one square per country in
-a layout that evokes the world — rather than real country outlines. There is no
-polygon fill in KOReader, and at e-ink sizes a tile grid reads better anyway,
-reusing the same drawing code as the heatmap.
+**Phase 4 — the year's shelf.** The books finished this year as spines on a
+shelf: height for pages, thickness for the hours they took, the ones still open
+set apart and filled to where you got.
 
-The *what* axis is the reason this project exists; the *when* axis of phase 1
-is the groundwork. Each phase gets its own design document under
-[`docs/`](docs/) before any code is written.
+**Later, maybe — the reading map, enriched.** Country, and genre for books that
+carry none, which would have to come from elsewhere (bookshelf's Hardcover id
+would make that reliable), drawn as a tile grid rather than country outlines.
+Seeing phase 2's map running made the case for the *how* axis over more of the
+*what* axis, so this one waits.
+
+Each phase gets its own design document under [`docs/`](docs/) before any code
+is written.
 
 ### Not planned
 

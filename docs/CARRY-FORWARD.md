@@ -17,10 +17,9 @@ connection closes is undefined behaviour.
 
 Phase 2's territorial map ended up reading `title`, `authors`, `language` and
 `series` through bookshelf's own book repository instead, so this did not
-come up. Phase 3, which is expected to add data from elsewhere and may read
-TEXT columns from `statistics.sqlite3` directly, is the one that will hit it:
-those must be read into Lua strings **before** the connection closes, or
-copied explicitly. On an e-reader the failure mode is a crash, which for the
+come up. Phase 3's fingerprint is the one that will hit it: it reads
+`book.title` from `statistics.sqlite3` directly. That value must be read into
+a Lua string **before** the connection closes, or copied explicitly. On an e-reader the failure mode is a crash, which for the
 user means a hard reboot.
 
 ## The host owns size; do not fight it
