@@ -11,7 +11,7 @@ on the device, with nothing sent anywhere.
 
 ## What works today
 
-Two modules, both running on a real Kindle.
+Three modules. The first two run on a real Kindle; the third is waiting for one.
 
 **Atlas year** (`atlas_heatmap`) — a year of reading as a grid of days, with
 month labels and your totals for the year. Intensity is **time read**, bucketed
@@ -22,8 +22,16 @@ rather than an empty grid or a saturated one.
 **Atlas hours** (`atlas_clock`) — an hour × weekday grid answering "when do I
 actually read?", with the hour you read most called out underneath.
 
-Both read KOReader's `statistics.sqlite3` **read-only**. Nothing is written
-back, nothing needs a network, and nothing leaves the device.
+Atlas year and Atlas hours read KOReader's `statistics.sqlite3` **read-only**.
+Nothing is written back, nothing needs a network, and nothing leaves the
+device.
+
+**Atlas map** (`atlas_map`) — your whole library as territory: one square
+per book, grouped by language, author, series or genre, shaded by how far you
+got (unread, on hold, reading, finished). Pick the grouping from the card's
+*Module settings*; add the card twice to see two at once. It reads bookshelf's
+own library, not the statistics database, so it is full even if you have
+barely opened a book in KOReader. **Not yet verified on a device.**
 
 ### Install
 
@@ -37,8 +45,9 @@ sh tools/install.sh <koreader-settings-dir>
 | Kobo | `/mnt/onboard/.adds/koreader/settings` |
 | Android | `<koreader-dir>/settings` |
 
-Restart KOReader, then add **Atlas year** and **Atlas hours** from bookshelf's
-module picker: open the module grid, long-press a module, and tap **+**.
+Restart KOReader, then add **Atlas year**, **Atlas hours** and **Atlas map**
+from bookshelf's module picker: open the module grid, long-press a module, and
+tap **+**.
 
 The installer copies into `<settings>/bookshelf/micromodules/`, which lives
 outside the plugin — so the modules survive bookshelf updates.
@@ -47,24 +56,26 @@ outside the plugin — so the modules survive bookshelf updates.
 
 ## Planned
 
-**Phase 2 — the reading map, without a network.** Your library as territory:
-language, author, series. The same grid, different axes. Everything it needs is
-already on the device.
+**Phase 3 — the book's fingerprint** (`atlas_fingerprint`). One strip per
+recent book, one line per stretch of it, shaded by how long you spent there
+per page: where you got stuck, where you raced, where you went back to re-read,
+where you stopped. It is drawn from the per-page timings in
+`statistics.sqlite3` — the one thing only the device knows, and the one no
+reading app or stats dashboard shows. Design:
+[`docs/superpowers/specs/2026-10-15-reading-atlas-phase-3-design.md`](docs/superpowers/specs/2026-10-15-reading-atlas-phase-3-design.md).
 
-**Phase 3 — the reading map, enriched.** Country and genre, which the
-statistics database does not carry and which have to come from elsewhere.
-Bookshelf's own Hardcover integration already stores a per-book id, and that
-id is what would make enrichment reliable rather than a guess at matching
-titles.
+**Phase 4 — the year's shelf.** The books finished this year as spines on a
+shelf: height for pages, thickness for the hours they took, the ones still open
+set apart and filled to where you got.
 
-The geographic map will be drawn as a **tile grid** — one square per country in
-a layout that evokes the world — rather than real country outlines. There is no
-polygon fill in KOReader, and at e-ink sizes a tile grid reads better anyway,
-reusing the same drawing code as the heatmap.
+**Later, maybe — the reading map, enriched.** Country, and genre for books that
+carry none, which would have to come from elsewhere (bookshelf's Hardcover id
+would make that reliable), drawn as a tile grid rather than country outlines.
+Seeing phase 2's map running made the case for the *how* axis over more of the
+*what* axis, so this one waits.
 
-The *what* axis is the reason this project exists; the *when* axis of phase 1
-is the groundwork. Each phase gets its own design document under
-[`docs/`](docs/) before any code is written.
+Each phase gets its own design document under [`docs/`](docs/) before any code
+is written.
 
 ### Not planned
 
@@ -92,7 +103,7 @@ iteration speed.
 ## Development
 
 ```sh
-sh tests/run.sh          # 7 suites, 56 tests
+sh tests/run.sh          # 10 suites, 126 tests
 LUA=luajit sh tests/run.sh
 ```
 
@@ -103,8 +114,12 @@ a laptop and then fail on the device.
 
 All the logic worth asserting — bucketing, the quartile scale, the calendar
 mapping, grid geometry, the three-state cache — is pure and tested here. The
-SQLite access, the blitbuffer painting and the two module files cannot be
-tested off-device and are verified on real hardware instead.
+SQLite access, the blitbuffer painting and the atlas_heatmap/atlas_clock
+module files cannot be tested off-device and are verified on real hardware
+instead. atlas_map.lua is exercised off-device against stubs too, and its
+bookshelf repository access against a fake repository, but the map's painting
+and the real repository still need the device — see
+[`docs/CARRY-FORWARD.md`](docs/CARRY-FORWARD.md) for what's left to verify.
 
 [`docs/CARRY-FORWARD.md`](docs/CARRY-FORWARD.md) collects what the device
 taught that no test could, including the one that crashed a Kindle.

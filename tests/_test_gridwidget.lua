@@ -46,7 +46,9 @@ package.loaded["ui/widget/textwidget"] = {
     new = function(_, o)
         o = o or {}
         o.getSize = function(self) return { w = #(self.text or "") * 6, h = 10 } end
-        o.paintTo = function(self, _bb, x) painted[#painted + 1] = { text = self.text, x = x } end
+        o.paintTo = function(self, _bb, x)
+            painted[#painted + 1] = { text = self.text, x = x, max_width = self.max_width }
+        end
         o.free = function() end
         return o
     end,
@@ -224,6 +226,72 @@ t.test("when labels do not all fit, the drawn ones are a REGULAR subset", functi
             "labels must be evenly spaced, got stride " .. (idx[i] - idx[i - 1]))
     end
     eq(idx[1], 1, "a regular subset starts at the first label")
+end)
+
+-- Records every rect painted, so a test can see which cells were left blank.
+local function paintedRects(w)
+    local rects = {}
+    w:paintTo({ paintRect = function(_, x, y, cw, ch, color)
+        rects[#rects + 1] = { x = x, y = y, v = color.v }
+    end }, 0, 0)
+    return rects
+end
+
+t.test("level() returning nil leaves that cell unpainted", function()
+    -- The territory map's blank separator columns depend on this: a blank
+    -- must not paint as step 0, or it reads as an unread book.
+    local w = GW.new{ width = 400, height = 200, cols = 3, rows = 1, grid = REAL_GRID,
+                      level = function(col) if col == 2 then return nil end return 4 end }
+    local rects = paintedRects(w)
+    eq(#rects, 2, "only the two non-nil cells should paint")
+    local step = w.geom.cell + w.geom.gap
+    eq(rects[1].x, 0)
+    eq(rects[2].x, 2 * step, "column 2 must be skipped, not shifted")
+end)
+
+t.test("level 0 still paints, as the lightest grey", function()
+    local w = GW.new{ width = 400, height = 200, cols = 2, rows = 1, grid = REAL_GRID,
+                      level = function() return 0 end }
+    local rects = paintedRects(w)
+    eq(#rects, 2, "step 0 is a real cell and must be painted")
+    eq(rects[1].v, GW.INK[0])
+end)
+
+t.test("truncate mode draws every label, each capped at its own width", function()
+    -- The same crowded strip that the default mode thins out: here nothing
+    -- may be skipped, because a territory without a name is unreadable.
+    local w = GW.new{ width = 120, height = 120, cols = 40, rows = 7,
+                      grid = REAL_GRID, level = function() return 0 end, face = "FACE",
+                      label_mode = "truncate",
+                      col_labels = { { col = 1, text = "Portuguese", width = 20 },
+                                     { col = 5, text = "English", width = 15 },
+                                     { col = 9, text = "Spanish", width = 30 } } }
+    local got = paintedLabels(w)
+    eq(#got, 3, "truncate mode must never skip a label")
+    eq(got[1].max_width, 20)
+    eq(got[2].max_width, 15)
+    eq(got[3].max_width, 30)
+    local step = w.geom.cell + w.geom.gap
+    eq(got[2].x, 4 * step, "a label sits at its own column")
+end)
+
+t.test("the default mode passes no max_width, so month labels are unchanged", function()
+    local w = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+                      grid = REAL_GRID, level = function() return 0 end, face = "FACE",
+                      col_labels = { { col = 1, text = "jan" } } }
+    local got = paintedLabels(w)
+    eq(#got, 1)
+    eq(got[1].max_width, nil)
+end)
+
+t.test("GW.labelHeight(face) matches the strip a labelled widget reserves", function()
+    -- atlas_map solves its layout against (budget - GW.labelHeight(face)); if
+    -- this drifts from what init() takes off, the map's plan and the painted
+    -- grid disagree about the cell size.
+    local w = GW.new{ width = 400, height = 200, cols = 10, rows = 5,
+                      grid = REAL_GRID, level = function() return 0 end, face = "FACE",
+                      col_labels = { { col = 1, text = "jan" } } }
+    eq(GW.labelHeight("FACE"), w:labelHeight())
 end)
 
 t.done()
