@@ -16,3 +16,6 @@ dist/
 *.sqlite3
 *.sqlite3-journal
 scratch/
+
+# Throwaway KOReader home for desktop previews (see README)
+.kohome/
