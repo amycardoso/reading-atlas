@@ -121,10 +121,11 @@ got.
 
 ### Later, maybe: the reading map, enriched
 
-Country, and genre for books that carry none. That data would have to come from
-elsewhere (bookshelf's Hardcover id would make the match reliable) and would be
-drawn as a tile grid rather than country outlines. Seeing the map running made
-the case for the *how* of reading over more of the *what*, so this one waits.
+Country for every book, and genre for the books that carry none. That data
+would have to come from elsewhere (bookshelf's Hardcover id would make the
+match reliable) and would be drawn as a tile grid rather than country outlines.
+Seeing the map running made the case for the *how* of reading over more of the
+*what*, so this one waits.
 
 Each phase gets its own design document under [`docs/`](docs/) before any code
 is written.
@@ -163,8 +164,9 @@ LUA=luajit sh tests/run.sh
 
 The suites run under a standalone Lua interpreter, **not** inside KOReader, by
 stubbing the KOReader modules a unit reaches for. Write **Lua 5.1**-compatible
-code: KOReader runs LuaJIT, so `//`, `goto` and bitwise operators load fine on
-a laptop and then fail on the device.
+code. KOReader runs LuaJIT, so Lua 5.3's `//` and bitwise operators load fine
+on a laptop and then fail on the device. LuaJIT does accept `goto`, but a
+Lua 5.1 interpreter running the suites does not, so leave it out too.
 
 All the logic worth asserting is pure and tested here: bucketing, the quartile
 scale, the calendar mapping, grid geometry, territory layout and the
