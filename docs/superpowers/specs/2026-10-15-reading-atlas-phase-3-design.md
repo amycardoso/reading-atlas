@@ -1,8 +1,21 @@
 # Reading Atlas — fase 3: a impressão digital do livro
 
 **Data:** 2026-10-15
-**Status:** desenho proposto, pendente de plano de implementação
+**Status:** implementado; falta verificar no aparelho (`CARRY-FORWARD.md`)
 **Spec anterior:** [`2026-09-23-reading-atlas-phase-2-design.md`](2026-09-23-reading-atlas-phase-2-design.md)
+**Plano:** [`../plans/2026-10-19-reading-atlas-phase-3.md`](../plans/2026-10-19-reading-atlas-phase-3.md)
+
+> **O que mudou na implementação** (detalhes no plano):
+> - Trechos relidos separados por até 1% do livro viram uma releitura só
+>   (`REREAD_BRIDGE`). Sem isso, uma releitura que pula uma página, ou que cai
+>   num layout novo, saía como uma barra tracejada.
+> - A legenda é "darker = longer per page · bar below = re-read".
+> - A premissa sobre TEXT estava errada: o `lua-ljsqlite3` do KOReader v2026.07
+>   copia TEXT com `ffi.string`. A leitura antes do `close()` continua, como
+>   defesa; ver `CARRY-FORWARD.md`.
+> - O teste novo em `_test_source.lua` não foi escrito: a separação de caches
+>   por chave já é testada ali de forma genérica. Em troca, `_test_db.lua`
+>   testa a consulta contra um SQLite falso.
 
 ## Objetivo
 

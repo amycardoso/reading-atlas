@@ -49,4 +49,85 @@ function M.hourRows()
     return out
 end
 
+-- ── The fingerprint ─────────────────────────────────────────────────────────
+-- Books with more than ten minutes of reading, most recently opened first.
+local FP_BOOKS = [[
+    SELECT id, title, pages, last_open
+    FROM book
+    WHERE total_read_time >= 600
+    ORDER BY last_open DESC
+    LIMIT %d;
+]]
+
+-- Their pages, summed per page, layout and day. A day is all the re-read rule
+-- needs, and it keeps a long book to a few thousand rows.
+local FP_ROWS = [[
+    SELECT id_book, page, total_pages, start_time / 86400 AS day,
+           SUM(duration) AS secs
+    FROM page_stat_data
+    WHERE id_book IN (%s)
+    GROUP BY id_book, page, total_pages, day;
+]]
+
+local function column(result, i, n)
+    local col = result and result[i]
+    return col and col[n]
+end
+
+-- Returns { books = { { id, title, pages, last_open } }, rows = { { id_book,
+-- page, total_pages, day, secs } } }, or nil when there is no readable
+-- statistics database. Never writes.
+--
+-- book.title is the first TEXT column Reading Atlas reads from this database.
+-- Every value is turned into a plain Lua value INSIDE the pcall, before
+-- conn:close() -- see CARRY-FORWARD.md.
+function M.fingerprintRows(limit)
+    local ok_ds, DataStorage = pcall(require, "datastorage")
+    if not ok_ds then return nil end
+    local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
+
+    local ok_sq, SQ3 = pcall(require, "lua-ljsqlite3/init")
+    if not ok_sq then return nil end
+
+    local conn
+    local ok, out = pcall(function()
+        conn = SQ3.open(path, "ro")
+        conn:exec("PRAGMA busy_timeout=200;")
+        local books, ids = {}, {}
+        local res = conn:exec(string.format(FP_BOOKS, math.floor(limit or 6)))
+        for n = 1, (res and res[1] and #res[1] or 0) do
+            local id = tonumber(column(res, 1, n))
+            if id then
+                local title = column(res, 2, n)
+                books[#books + 1] = {
+                    id = id,
+                    title = title ~= nil and tostring(title) or "",
+                    pages = tonumber(column(res, 3, n)),
+                    last_open = tonumber(column(res, 4, n)),
+                }
+                ids[#ids + 1] = string.format("%d", id)
+            end
+        end
+        local rows = {}
+        if #ids > 0 then
+            local r = conn:exec(string.format(FP_ROWS, table.concat(ids, ",")))
+            for n = 1, (r and r[1] and #r[1] or 0) do
+                rows[n] = {
+                    id_book = tonumber(column(r, 1, n)),
+                    page = tonumber(column(r, 2, n)),
+                    total_pages = tonumber(column(r, 3, n)),
+                    day = tonumber(column(r, 4, n)),
+                    secs = tonumber(column(r, 5, n)) or 0,
+                }
+            end
+        end
+        return { books = books, rows = rows }
+    end)
+
+    if conn then pcall(function() conn:close() end) end
+
+    if not ok then return nil end
+    return out
+end
+
 return M

@@ -4,16 +4,17 @@ Reading insights for [KOReader](https://koreader.rocks), as drop-in
 micro-modules for [`bookshelf.koplugin`](https://github.com/AndyHazz/bookshelf.koplugin).
 
 Bookshelf already gives you a home screen worth looking at. Reading Atlas adds
-cards to it that show *your reading*: when you read, how much, and what your
-library is made of. Everything is computed on the device, from KOReader's own
-data. Nothing needs a network and nothing leaves the e-reader.
+cards to it that show *your reading*: when you read, how much, how you read
+each book, and what your library is made of. Everything is computed on the
+device, from KOReader's own data. Nothing needs a network and nothing leaves
+the e-reader.
 
 <p align="center">
   <img src="docs/img/dashboard.png" width="400"
-       alt="Atlas year, Atlas hours and Atlas map in bookshelf's full-screen module view">
+       alt="Atlas year, Atlas fingerprint, Atlas hours and Atlas map in bookshelf's full-screen module view">
 </p>
 
-<p align="center"><sub>The three cards in bookshelf's full-screen module view,
+<p align="center"><sub>The four cards in bookshelf's full-screen module view,
 on a Paperwhite-sized screen. Rendered in KOReader desktop with a sample library
 and simulated statistics.</sub></p>
 
@@ -26,6 +27,7 @@ and simulated statistics.</sub></p>
 | Atlas year | `atlas_heatmap` | `statistics.sqlite3` | verified on a Kindle |
 | Atlas hours | `atlas_clock` | `statistics.sqlite3` | verified on a Kindle |
 | Atlas map | `atlas_map` | bookshelf's library | not yet verified |
+| Atlas fingerprint | `atlas_fingerprint` | `statistics.sqlite3` | not yet verified |
 
 ### Atlas year
 
@@ -60,14 +62,36 @@ finished (darkest), reading, on hold, unread (lightest).
 - It reads bookshelf's own library, not the statistics database, so it is full
   even if you have barely opened a book in KOReader.
 
+### Atlas fingerprint
+
+<img src="docs/img/atlas-fingerprint.png" width="360" align="right"
+     alt="Atlas fingerprint: one strip per recent book, darker where more time was spent per page, with a bar under re-read stretches">
+
+How you read each recent book. Each strip is one book, from its first page on
+the left to its last on the right, and it is darker where you spent longer
+per page:
+
+- where you got stuck, and where the book took off;
+- a black bar under what you went back to **re-read**;
+- where you stopped, with the rest of the book dotted;
+- a note naming the stretch you lingered on, and whether the book is finished,
+  still being read or paused.
+
+It is drawn from the per-page timings in `statistics.sqlite3`. Only the device
+keeps those, and no reading app or stats dashboard shows them. Changing the
+font mid-book does not break a strip: positions are mapped by how far into the
+book a page is, not by its number.
+
+<br clear="right">
+
 ---
 
 ## Install
 
 **You need** KOReader with [bookshelf](https://github.com/AndyHazz/bookshelf.koplugin)
-installed and running. For Atlas year and Atlas hours, KOReader's built-in
-*Reading statistics* plugin must be on (it is by default); the cards fill in as
-you read.
+installed and running. Atlas year, Atlas hours and Atlas fingerprint need
+KOReader's built-in *Reading statistics* plugin on (it is by default); the
+cards fill in as you read.
 
 1. Copy the modules into KOReader's **settings** directory (not the plugins
    directory):
@@ -87,7 +111,7 @@ you read.
 
 2. Restart KOReader.
 3. Open the module grid, long-press a module, tap **+**, and add **Atlas year**,
-   **Atlas hours** or **Atlas map**.
+   **Atlas hours**, **Atlas map** or **Atlas fingerprint**.
 
 `<settings>/bookshelf/micromodules/` lives outside the plugin, so the modules
 survive bookshelf updates.
@@ -96,24 +120,7 @@ survive bookshelf updates.
 
 ## Planned
 
-### Phase 3: the book's fingerprint
-
-<img src="docs/img/fingerprint-mockup.png" width="360" align="right"
-     alt="Mockup: one strip per book, darker where more time was spent per page">
-
-One strip per recent book, one line per stretch of it, shaded by how long you
-spent there per page. It shows where you got stuck, where you raced, where you
-went back to re-read and where you stopped.
-
-It is drawn from the per-page timings in `statistics.sqlite3`. Only the device
-keeps those, and no reading app or stats dashboard shows them.
-
-The image is a mockup with simulated data. Design:
-[`docs/superpowers/specs/2026-10-15-reading-atlas-phase-3-design.md`](docs/superpowers/specs/2026-10-15-reading-atlas-phase-3-design.md).
-
-<br clear="right">
-
-### Phase 4: the year's shelf
+### Next: the year's shelf
 
 The books finished this year as spines on a shelf: height for pages, thickness
 for the hours they took. The ones still open stand apart, filled to where you
@@ -158,7 +165,7 @@ iteration speed.
 ### Tests
 
 ```sh
-sh tests/run.sh          # 10 suites, 126 tests
+sh tests/run.sh          # 14 suites, 184 tests
 LUA=luajit sh tests/run.sh
 ```
 
@@ -169,9 +176,11 @@ on a laptop and then fail on the device. LuaJIT does accept `goto`, but a
 Lua 5.1 interpreter running the suites does not, so leave it out too.
 
 All the logic worth asserting is pure and tested here: bucketing, the quartile
-scale, the calendar mapping, grid geometry, territory layout and the
-three-state cache. SQLite access, blitbuffer painting and bookshelf's real
-repository are not, which is what the next two steps are for.
+scale, the calendar mapping, grid geometry, territory layout, the
+fingerprint's positions, re-reads and slowest stretch, and the three-state
+cache. The queries run against a fake SQLite. Real SQLite access, blitbuffer
+painting and bookshelf's real repository are not tested here, which is what the
+next two steps are for.
 
 ### Preview on a computer
 

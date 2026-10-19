@@ -1,0 +1,199 @@
+-- atlas_fingerprint.lua is composition over fingerprint.lua and the strip
+-- widget. It runs here against stubs of bookshelf's Kit and KOReader's
+-- widgets, to catch what the other suites cannot: a typo, a nil, a state wired
+-- to the wrong card. Painting and the real database are verified on a device.
+package.path = "./?.lua;./?/init.lua;" .. package.path
+
+local H = dofile("tests/_helpers.lua")
+local t = H.runner()
+local eq = H.eq
+
+-- ── stubs ──────────────────────────────────────────────────────────────────
+local function ctor(extra)
+    return { new = function(_, o)
+        o = o or {}
+        if extra then extra(o) end
+        return o
+    end }
+end
+package.loaded["ui/geometry"] = { new = function(_, o) return o end }
+package.loaded["ffi/blitbuffer"] = { Color8 = function(v) return v end }
+local WidgetStub = {}
+function WidgetStub:extend(sub) return setmetatable(sub or {}, { __index = self }) end
+function WidgetStub:new(o)
+    o = setmetatable(o or {}, { __index = self })
+    if o.init then o:init() end
+    return o
+end
+function WidgetStub:handleEvent() return false end
+package.loaded["ui/widget/widget"] = WidgetStub
+package.loaded["ui/widget/textwidget"] = ctor(function(o)
+    o.getSize = function(self) return { w = #(self.text or "") * 6, h = 10 } end
+    o.free = function() end
+end)
+package.loaded["ui/widget/verticalgroup"] = ctor()
+package.loaded["ui/widget/verticalspan"] = ctor()
+package.loaded["ui/widget/overlapgroup"] = ctor()
+package.loaded["ui/widget/container/rightcontainer"] = ctor()
+
+local scheduled = {}
+package.loaded["ui/uimanager"] = {
+    scheduleIn = function(_, _secs, fn) scheduled[#scheduled + 1] = fn end,
+}
+package.loaded["lib/bookshelf_i18n"] = { gettext = function(s) return s end }
+package.loaded["lib/bookshelf_module_kit"] = {
+    COLOR_MUTED = "muted", COLOR_PRIMARY = "primary",
+    sc = function() return function(n) return n end end,
+    face = function() return "FACE", false end,
+    valueCard = function(o) return { card = true, heading = o.heading, value = o.value, sub = o.sub } end,
+}
+
+-- The database is faked through the loader's memo.
+local db_answer, db_calls = nil, 0
+package.loaded["atlas/db"] = {
+    fingerprintRows = function(limit)
+        db_calls = db_calls + 1
+        assert(limit == 6, "asks for at most six books")
+        return db_answer
+    end,
+}
+local Source = dofile("micromodules/atlas/source.lua")
+package.loaded["atlas/source"] = Source
+
+local FP = dofile("micromodules/atlas_fingerprint.lua")
+
+local function runScheduled()
+    local q = scheduled
+    scheduled = {}
+    for i = 1, #q do q[i]() end
+end
+
+local function settle(ctx)
+    Source.reset()
+    scheduled = {}
+    FP.render(ctx)
+    runScheduled()
+    return FP.render(ctx)
+end
+
+local function ctx(extra)
+    local c = { width = 300, height = 400, scale = 100, refresh = function() end }
+    for k, v in pairs(extra or {}) do c[k] = v end
+    return c
+end
+
+local DAY = 86400
+local NOW = os.time()
+
+-- A finished book with a re-read, and one in progress opened today.
+local function sample()
+    local rows = {}
+    for p = 1, 100 do
+        rows[#rows + 1] = { id_book = 1, page = p, total_pages = 100, day = 1, secs = 60 }
+    end
+    for p = 40, 45 do
+        rows[#rows + 1] = { id_book = 1, page = p, total_pages = 100, day = 2, secs = 60 }
+    end
+    for p = 1, 50 do
+        rows[#rows + 1] = { id_book = 2, page = p, total_pages = 200, day = 3, secs = 90 }
+    end
+    return {
+        books = {
+            { id = 1, title = "Dom Casmurro", pages = 100, last_open = NOW - 40 * DAY },
+            { id = 2, title = "Ficciones", pages = 200, last_open = NOW },
+        },
+        rows = rows,
+    }
+end
+
+-- The card's children for book i: title line, span, strip, note, span.
+local function bookParts(card, i)
+    local base = 2 + (i - 1) * 5
+    return { line = card[base + 1], strip = card[base + 3], note = card[base + 4] }
+end
+
+-- ── tests ──────────────────────────────────────────────────────────────────
+t.test("the module declares a frozen key and a summary", function()
+    eq(FP.key, "atlas_fingerprint")
+    assert(type(FP.summary) == "string" and #FP.summary > 0)
+end)
+
+t.test("the first render is the loading card and queries off the paint path", function()
+    Source.reset()
+    scheduled = {}
+    db_calls = 0
+    eq(FP.render(ctx()).value, "Reading…")
+    eq(db_calls, 0, "the database must not be read inside render")
+    eq(#scheduled, 1)
+end)
+
+t.test("no database is the No statistics card", function()
+    db_answer = nil
+    eq(settle(ctx()).value, "No statistics")
+end)
+
+t.test("a database with no book over ten minutes is its own card", function()
+    db_answer = { books = {}, rows = {} }
+    local card = settle(ctx())
+    eq(card.value, "Not enough reading yet")
+end)
+
+t.test("the Add picker never starts the query", function()
+    Source.reset()
+    scheduled = {}
+    db_calls = 0
+    eq(FP.render(ctx{ preview = true }).value, "Reading…")
+    eq(#scheduled, 0)
+end)
+
+t.test("with data: heading, then title, strip and note per book, then legend", function()
+    db_answer = sample()
+    local card = settle(ctx())
+    eq(card.card, nil, "must not be a valueCard")
+    eq(card[1].text, "Atlas fingerprint")
+    local first = bookParts(card, 1)
+    eq(first.line[1].text, "Ficciones", "most recently opened first")
+    eq(first.line[2][1].text, "1.2 h · 25%")
+    assert(first.strip.levels, "the strip widget sits under the title")
+    eq(first.strip.width, 300)
+    eq(card[#card].text, "darker = longer per page · bar below = re-read")
+end)
+
+t.test("a finished book shows its pages, its re-read and no status", function()
+    db_answer = sample()
+    local second = bookParts(settle(ctx()), 2)
+    eq(second.line[1].text, "Dom Casmurro")
+    eq(second.line[2][1].text, "1.8 h · 100 p.")
+    eq(second.note.text, "lingered on p. 36–45 (16 min) · re-read p. 40–45")
+    assert(#second.strip.rereads == 1, "one re-read bar")
+end)
+
+t.test("a book in progress says reading; an old one says paused since", function()
+    db_answer = sample()
+    db_answer.books[2].last_open = NOW - 60 * DAY
+    local card = settle(ctx())
+    local note = bookParts(card, 2).note.text
+    assert(note:find("paused since ", 1, true), note)
+    db_answer = sample()
+    local note2 = bookParts(settle(ctx()), 1).note.text
+    assert(note2:find("· reading$"), note2)
+end)
+
+t.test("as many books as the height allows, at least one", function()
+    db_answer = sample()
+    -- heading 10 + span 6 + legend 10 = 26; a book is 10+2+20+2+4+10+7 = 55.
+    local function books(card) return (#card - 3) / 5 end
+    eq(books(settle(ctx{ height = 26 + 55 })), 1)
+    eq(books(settle(ctx{ height = 26 + 110 })), 2)
+    eq(books(settle(ctx{ height = 5 })), 1)
+end)
+
+t.test("rendering twice at the same width reuses the layout", function()
+    db_answer = sample()
+    local c = ctx()
+    local a = settle(c)
+    local b = FP.render(c)
+    eq(bookParts(a, 1).strip.levels == bookParts(b, 1).strip.levels, true)
+end)
+
+t.done()

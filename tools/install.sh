@@ -28,7 +28,7 @@ DEST="$SETTINGS/bookshelf/micromodules"
 mkdir -p "$DEST/atlas"
 
 cd "$(dirname "$0")/.."
-cp micromodules/atlas_heatmap.lua micromodules/atlas_clock.lua micromodules/atlas_map.lua "$DEST/"
+cp micromodules/atlas_heatmap.lua micromodules/atlas_clock.lua micromodules/atlas_map.lua micromodules/atlas_fingerprint.lua "$DEST/"
 cp micromodules/atlas/*.lua "$DEST/atlas/"
 
 # macOS writes AppleDouble sidecars (._name) when copying onto the FAT/exFAT
