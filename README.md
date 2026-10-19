@@ -165,7 +165,7 @@ iteration speed.
 ### Tests
 
 ```sh
-sh tests/run.sh          # 14 suites, 191 tests
+sh tests/run.sh          # 14 suites, 204 tests
 LUA=luajit sh tests/run.sh
 ```
 

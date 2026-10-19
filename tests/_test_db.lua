@@ -66,6 +66,7 @@ local ROWS = {
     { 624, 624, 688 },  -- total_pages
     { 19700, 19700, 19650 }, -- day
     { 60, 75, 90 },     -- secs
+    { 1702000000, 1702000100, 1698000000 }, -- last_seen
 }
 
 t.test("books and rows come back as plain Lua values", function()
@@ -74,7 +75,8 @@ t.test("books and rows come back as plain Lua values", function()
     eq(got.books[1], { id = 7, title = "Grande Sertão: Veredas", pages = 624, last_open = 1700000000 })
     eq(type(got.books[2].title), "string")
     eq(#got.rows, 3)
-    eq(got.rows[3], { id_book = 3, page = 10, total_pages = 688, day = 19650, secs = 90 })
+    eq(got.rows[3], { id_book = 3, page = 10, total_pages = 688, day = 19650, secs = 90,
+        last_seen = 1698000000 })
 end)
 
 t.test("the title is read before the connection closes", function()
@@ -97,6 +99,10 @@ t.test("opens read-only, limits the books, and asks only for their rows", functi
     assert(books_sql:find("LIMIT 6", 1, true), books_sql)
     assert(books_sql:find("total_read_time >= 600", 1, true), books_sql)
     assert(rows_sql:find("IN (7,3)", 1, true), rows_sql)
+    -- Days split at the reader's midnight, not UTC's.
+    assert(rows_sql:find("'unixepoch', 'localtime'", 1, true), rows_sql)
+    assert(rows_sql:find("strftime('%s'", 1, true), "the %% must survive string.format: " .. rows_sql)
+    assert(rows_sql:find("MAX(start_time) AS last_seen", 1, true), rows_sql)
 end)
 
 t.test("no qualifying book: an empty answer, and no second query", function()

@@ -61,9 +61,16 @@ local FP_BOOKS = [[
 
 -- Their pages, summed per page, layout and day. A day is all the re-read rule
 -- needs, and it keeps a long book to a few thousand rows.
+--
+-- The day is the reader's LOCAL day: strftime('%s', …, 'localtime') is the
+-- local wall-clock time counted as if it were UTC, so dividing it by 86400
+-- splits at local midnight. A plain start_time / 86400 would split a
+-- Brazilian evening at 21:00. last_seen breaks ties between two layouts read
+-- on the same day (a font change today).
 local FP_ROWS = [[
-    SELECT id_book, page, total_pages, start_time / 86400 AS day,
-           SUM(duration) AS secs
+    SELECT id_book, page, total_pages,
+           CAST(strftime('%%s', start_time, 'unixepoch', 'localtime') AS INTEGER) / 86400 AS day,
+           SUM(duration) AS secs, MAX(start_time) AS last_seen
     FROM page_stat_data
     WHERE id_book IN (%s)
     GROUP BY id_book, page, total_pages, day;
@@ -118,6 +125,7 @@ function M.fingerprintRows(limit)
                     total_pages = tonumber(column(r, 3, n)),
                     day = tonumber(column(r, 4, n)),
                     secs = tonumber(column(r, 5, n)) or 0,
+                    last_seen = tonumber(column(r, 6, n)),
                 }
             end
         end

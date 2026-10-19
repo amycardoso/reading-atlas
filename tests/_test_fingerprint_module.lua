@@ -189,6 +189,45 @@ t.test("a book in progress says reading; an old one says paused since", function
     assert(note2:find("· reading$"), note2)
 end)
 
+t.test("a book paused in an earlier year names the year", function()
+    db_answer = sample()
+    local last_year = os.date("*t", NOW).year - 1
+    db_answer.books[2].last_open = os.time{ year = last_year, month = 3, day = 15, hour = 12 }
+    local note = bookParts(settle(ctx()), 2).note.text
+    assert(note:find("paused since Mar " .. last_year, 1, true), note)
+end)
+
+t.test("a book paused earlier this year names only the month", function()
+    local y = os.date("*t", NOW).year
+    local jan = os.time{ year = y, month = 1, day = 1, hour = 12 }
+    if NOW - jan < 30 * DAY then return end -- too early in the year to pause
+    db_answer = sample()
+    db_answer.books[2].last_open = jan
+    local note = bookParts(settle(ctx()), 2).note.text
+    assert(note:find("paused since Jan$"), note)
+end)
+
+t.test("the status follows the clock, not the time of the first render", function()
+    local real_time = os.time
+    local fake_now = NOW
+    os.time = function(t) if t then return real_time(t) end return fake_now end
+    local ok, err = pcall(function()
+        db_answer = sample()
+        db_answer.books[2].last_open = NOW - 29 * DAY
+        local c = ctx()
+        local first = settle(c)
+        -- Ficciones, opened 29 days ago, still sorts first.
+        assert(bookParts(first, 1).note.text:find("· reading$"), "29 days: reading")
+        -- Same query result, two days later: no new query, but a new status.
+        fake_now = NOW + 2 * DAY
+        local later = FP.render(c)
+        local note = bookParts(later, 1).note.text
+        assert(note:find("paused since ", 1, true), note)
+    end)
+    os.time = real_time
+    if not ok then error(err, 0) end
+end)
+
 t.test("as many books as the height allows, at least one", function()
     db_answer = sample()
     -- heading 10 + span 6 + legend 10 = 26; a book is 10+2+20+2+4+10+7 = 55.

@@ -3,10 +3,10 @@
 -- Pure logic, no KOReader. Input is what db.fingerprintRows() returns:
 --
 --   { books = { { id, title, pages, last_open }, … },
---     rows  = { { id_book, page, total_pages, day, secs }, … } }
+--     rows  = { { id_book, page, total_pages, day, secs, last_seen }, … } }
 --
 -- where a row is the time spent on one page, in the layout of the moment
--- (total_pages), on one day.
+-- (total_pages), on one local day; last_seen is the row's latest start_time.
 --
 -- ── WHY POSITIONS, NOT PAGES ────────────────────────────────────────────────
 -- Changing the font or margins of an EPUB re-paginates it: page 120 of 300
@@ -31,6 +31,9 @@ M.FINISHED_AT = 0.97
 -- progress() looks for real reading in a window of this fraction of the book
 -- (at least 5 pages) ending at a page.
 M.PROGRESS_WINDOW = 0.02
+-- Overlaps below this (in buckets) are floating-point noise, not reading:
+-- (page - 1) / total_pages * n can land a hair past a bucket edge.
+local EPS = 1e-9
 -- Not touched for this long, and not finished: paused, not reading.
 M.PAUSED_AFTER = 30 * DAY
 -- The most books the card ever shows.
@@ -53,23 +56,27 @@ local function spread(a, b, n, fn)
     local last = math.min(n, math.ceil(B))
     for k = first, last do
         local overlap = math.min(B, k) - math.max(A, k - 1)
-        if overlap > 0 then fn(k, overlap / width) end
+        if overlap > EPS then fn(k, overlap / width) end
     end
 end
 
 -- The book's page count now: what the reader sees, and what notes name. Falls
 -- back to the layout of the most recent row when the book table has none.
+-- "Most recent" is by start time, not by day: a font change today leaves two
+-- layouts on the same day, and row order from SQL is not defined.
 local function currentPages(book, rows)
     if book.pages and book.pages > 0 then return book.pages end
-    local best, day = nil, -1
+    local best, seen = nil, nil
     for i = 1, #rows do
         local r = rows[i]
-        if r.total_pages and r.total_pages > 0 and (r.day or 0) >= day then
-            best, day = r.total_pages, r.day or 0
+        if r.total_pages and r.total_pages > 0 then
+            local s = r.last_seen or r.day or 0
+            if not seen or s > seen then best, seen = r.total_pages, s end
         end
     end
     return best or 1
 end
+M.currentPages = currentPages
 
 -- Time spread over n buckets. Returns secs[k] (seconds spent in bucket k) and
 -- read[k] (true when any row touched it).
@@ -114,38 +121,82 @@ function M.reach(rows)
     return far
 end
 
--- How far the reader actually got, 0..1: the furthest page with real reading
--- around it, meaning at least half of the PROGRESS_WINDOW pages ending there
--- were read. A look at the last page (the table of contents, an endnote, how
--- long the book is) touches one page in that window and does not count;
--- reading the ending does. Coverage alone would not do: a reader who skips
--- an appendix or a preface still finished the book.
-function M.progress(rows, pages)
-    local _secs, read = M.buckets(rows, pages)
+-- ── Real reading ────────────────────────────────────────────────────────────
+-- A tally of rows at page resolution (the book's current count), built up one
+-- row at a time so the re-read rule can ask "how far had the reader really got
+-- before this day?".
+local function newTally(pages)
+    local st = { pages = pages, secs = {}, starts = {}, ends = {}, seen = {} }
+    for p = 1, pages do st.secs[p] = 0; st.starts[p] = 0; st.ends[p] = 0 end
+    return st
+end
+
+-- Adds a row. Each distinct page of each layout counts once as a source, at
+-- the first current page it covers, so the window rule can tell one look at a
+-- page from several pages read.
+local function tallyRow(st, r)
+    local a, b = rowSpan(r)
+    if not a then return end
+    local s = r.secs or 0
+    local first, last
+    spread(a, b, st.pages, function(p, f)
+        st.secs[p] = st.secs[p] + s * f
+        first = first or p
+        last = p
+    end)
+    if not first then return end
+    local key = (r.page or 0) .. ":" .. r.total_pages
+    if not st.seen[key] then
+        st.seen[key] = true
+        st.starts[first] = st.starts[first] + 1
+        if last > st.ends[first] then st.ends[first] = last end
+    end
+end
+
+-- How far the reader really got, 0..1, from a tally: the furthest page that
+--   * was read, not flipped past (SKIM_SECS a page or more), and
+--   * ends a window of max(5 pages, PROGRESS_WINDOW of the book) in which at
+--     least half the pages were read, coming from at least two different
+--     pages of the book in whatever layout they were read.
+-- The half rule keeps one look at the last page (the table of contents, an
+-- endnote) from counting; the read-not-flipped rule keeps paging through to
+-- the end from counting; the two-sources rule keeps one page of an old,
+-- smaller-font layout -- which spans several current pages -- from counting.
+-- Coverage alone would not do: a reader who skips an appendix still finished.
+local function frontier(st)
+    local pages = st.pages
     local w = math.max(5, math.ceil(pages * M.PROGRESS_WINDOW))
-    local prefix = { [0] = 0 }
-    for p = 1, pages do prefix[p] = prefix[p - 1] + (read[p] and 1 or 0) end
+    local pread, pstart, maxend = { [0] = 0 }, { [0] = 0 }, { [0] = 0 }
+    for p = 1, pages do
+        local real = st.secs[p] >= M.SKIM_SECS
+        pread[p] = pread[p - 1] + (real and 1 or 0)
+        pstart[p] = pstart[p - 1] + st.starts[p]
+        maxend[p] = math.max(maxend[p - 1], st.ends[p])
+    end
     local best = 0
     for p = 1, pages do
-        if read[p] then
+        if st.secs[p] >= M.SKIM_SECS then
             -- Near the start the window is shorter, and so is the bar.
             local lo = math.max(1, p - w + 1)
             local len = p - lo + 1
-            if prefix[p] - prefix[lo - 1] >= math.ceil(len / 2) then best = p end
+            local sources = pstart[p] - pstart[lo - 1]
+            if lo > 1 and maxend[lo - 1] >= lo then sources = sources + 1 end
+            if pread[p] - pread[lo - 1] >= math.ceil(len / 2)
+                    and sources >= math.min(2, len) then
+                best = p
+            end
         end
     end
     return best / pages
 end
 
--- Buckets read again after the reader had been well past them, as merged
--- { from, to } intervals of bucket indexes.
---
--- A bucket is re-read on day d when it was already read on an earlier day AND,
--- before d, the reader had reached at least REREAD_LEAD further on than the
--- page now being read. The second condition is what keeps the page where one
--- session ends and the next begins from counting: it shows up on two days, but
--- nobody had gone past it.
-function M.rereads(rows, n)
+function M.progress(rows, pages)
+    local st = newTally(pages)
+    for i = 1, #rows do tallyRow(st, rows[i]) end
+    return frontier(st)
+end
+
+local function byDay(rows)
     local by_day, days = {}, {}
     for i = 1, #rows do
         local r = rows[i]
@@ -155,45 +206,56 @@ function M.rereads(rows, n)
         list[#list + 1] = r
     end
     table.sort(days)
+    return by_day, days
+end
 
+-- Pages read again after the reader had been well past them, as merged
+-- { from, to } intervals in the book's current page count.
+--
+-- A page is re-read on day d when
+--   * it was already read on an earlier day,
+--   * that day it was read, not flipped past (SKIM_SECS or more), and
+--   * before d, the reader had REALLY got (frontier(), not the raw reach) at
+--     least REREAD_LEAD further on.
+-- The last condition keeps the page where one session ends and the next
+-- begins from counting, and a look at the end of the book from turning every
+-- later session start into a re-read.
+function M.rereads(rows, pages)
+    local by_day, days = byDay(rows)
+    local st = newTally(pages)
     local first_day, marked = {}, {}
     local far_before = 0
     for _i, d in ipairs(days) do
         local list = by_day[d]
-        local far_today = far_before
-        -- Judge the whole day against the state before it, then fold it in.
+        local today = {}
         for _j, r in ipairs(list) do
             local a, b = rowSpan(r)
             if a then
-                if far_before >= b + M.REREAD_LEAD then
-                    spread(a, b, n, function(k)
-                        if first_day[k] and first_day[k] < d then marked[k] = true end
-                    end)
-                end
-                if b > far_today then far_today = b end
+                local s = r.secs or 0
+                spread(a, b, pages, function(p, f) today[p] = (today[p] or 0) + s * f end)
             end
         end
-        for _j, r in ipairs(list) do
-            local a, b = rowSpan(r)
-            if a then
-                spread(a, b, n, function(k)
-                    if not first_day[k] then first_day[k] = d end
-                end)
+        for p, s in pairs(today) do
+            if first_day[p] and first_day[p] < d and s >= M.SKIM_SECS
+                    and far_before >= p / pages + M.REREAD_LEAD then
+                marked[p] = true
             end
+            if not first_day[p] then first_day[p] = d end
         end
-        far_before = far_today
+        for _j, r in ipairs(list) do tallyRow(st, r) end
+        far_before = frontier(st)
     end
 
     -- A re-read skips a page here and there, and a re-pagination makes a
-    -- stretch land on every other bucket; gaps up to REREAD_BRIDGE of the
-    -- book are bridged so one re-read is one bar, not a dashed line.
-    local bridge = math.floor(n * M.REREAD_BRIDGE)
+    -- stretch land on every other page; gaps up to REREAD_BRIDGE of the book
+    -- are bridged so one re-read is one bar, not a dashed line.
+    local bridge = math.floor(pages * M.REREAD_BRIDGE)
     local out, k = {}, 1
-    while k <= n do
+    while k <= pages do
         if marked[k] then
             local from, to = k, k
             local j = k + 1
-            while j <= n and j - to - 1 <= bridge do
+            while j <= pages and j - to - 1 <= bridge do
                 if marked[j] then to = j end
                 j = j + 1
             end
@@ -214,11 +276,11 @@ function M.largest(intervals)
     return best
 end
 
--- Bucket interval -> page interval in the current count.
-function M.toPages(iv, n, pages)
-    local from = math.floor((iv.from - 1) * pages / n) + 1
-    local to = math.max(from, math.ceil(iv.to * pages / n))
-    return from, math.min(to, pages)
+-- Page interval (current count) -> bucket interval of an n-wide strip.
+function M.toBuckets(iv, pages, n)
+    local from = math.floor((iv.from - 1) * n / pages + EPS) + 1
+    local to = math.max(from, math.ceil(iv.to * n / pages - EPS))
+    return { from = from, to = math.min(to, n) }
 end
 
 -- The stretch where the most time went: a window of max(10 pages, 2% of the
@@ -250,7 +312,8 @@ function M.status(progress, last_open, now)
 end
 
 -- Books with their rows, most recently opened first, at most MAX_BOOKS.
--- Width-independent: everything here is computed once per query.
+-- Everything that does not depend on the strip's width is computed here, once
+-- per query: progress, status, re-reads and the slowest stretch.
 function M.prepare(data, now)
     local by_book = {}
     for i = 1, #(data.rows or {}) do
@@ -267,10 +330,13 @@ function M.prepare(data, now)
             for j = 1, #rows do secs = secs + (rows[j].secs or 0) end
             local pages = currentPages(b, rows)
             local progress = M.progress(rows, pages)
+            local rereads = M.rereads(rows, pages)
             books[#books + 1] = {
                 id = b.id, title = b.title or "", last_open = b.last_open or 0,
                 pages = pages, rows = rows, secs = secs,
                 progress = progress, status = M.status(progress, b.last_open, now),
+                rereads = rereads, reread_pages = M.largest(rereads),
+                slowest = M.slowest(rows, pages),
             }
         end
     end
@@ -282,13 +348,16 @@ function M.prepare(data, now)
     return { books = books }
 end
 
--- Per-book strips at n buckets, with one scale shared by every book on the
--- card so they compare: a hard book reads darker than an easy one, not just
--- different inside. Level per bucket: nil = not read, 0 = skimmed, 1..4 =
--- quartiles of seconds per page.
-function M.layout(prep, n, Scale)
+-- Strips for the first `count` books at n buckets, with one scale shared by
+-- the books on the card so they compare: a hard book reads darker than an
+-- easy one, not just different inside. Level per bucket: nil = not read,
+-- 0 = flipped past, 1..4 = quartiles of seconds per page. Only what depends
+-- on the width is computed here; the rest comes from prepare().
+function M.layout(prep, n, Scale, count)
+    count = math.min(count or #prep.books, #prep.books)
     local strips, values = {}, {}
-    for i, b in ipairs(prep.books) do
+    for i = 1, count do
+        local b = prep.books[i]
         local dens = M.density(b.rows, n, b.pages)
         strips[i] = { book = b, density = dens }
         for k = 1, n do
@@ -307,11 +376,11 @@ function M.layout(prep, n, Scale)
         end
         s.levels = levels
         s.density = nil
-        s.rereads = M.rereads(s.book.rows, n)
-        -- The note's re-read names pages, so it is measured in pages, not in
-        -- buckets of this particular width.
-        s.reread_pages = M.largest(M.rereads(s.book.rows, s.book.pages))
-        s.slowest = M.slowest(s.book.rows, s.book.pages)
+        local bars = {}
+        for j, iv in ipairs(s.book.rereads) do bars[j] = M.toBuckets(iv, s.book.pages, n) end
+        s.rereads = bars
+        s.reread_pages = s.book.reread_pages
+        s.slowest = s.book.slowest
     end
     return strips
 end

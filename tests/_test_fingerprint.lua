@@ -163,9 +163,105 @@ t.test("largest picks the widest interval, the first on a tie", function()
     eq(F.largest({}), nil)
 end)
 
-t.test("toPages converts bucket intervals to the current page count", function()
-    eq({ F.toPages({ from = 2, to = 3 }, 10, 100) }, { 11, 30 })
-    eq({ F.toPages({ from = 1, to = 1 }, 1000, 100) }, { 1, 1 })
+t.test("toBuckets converts page intervals to strip buckets", function()
+    eq(F.toBuckets({ from = 11, to = 30 }, 100, 10), { from = 2, to = 3 })
+    eq(F.toBuckets({ from = 1, to = 1 }, 100, 1000), { from = 1, to = 10 })
+    eq(F.toBuckets({ from = 100, to = 100 }, 100, 10), { from = 10, to = 10 })
+end)
+
+-- ── review findings (PR #5) ────────────────────────────────────────────────
+t.test("a look at the end of the book does not turn session starts into re-reads", function()
+    -- Day 1: pages 1..50 of 300, and a glance at page 300 (the contents).
+    local rows = {}
+    for p = 1, 50 do rows[#rows + 1] = row(p, 300, 1, 60) end
+    rows[#rows + 1] = row(300, 300, 1, 20)
+    -- Day 2: resumes at page 50 and reads on.
+    for p = 50, 120 do rows[#rows + 1] = row(p, 300, 2, 60) end
+    eq(F.rereads(rows, 300), {})
+end)
+
+t.test("flipping back past pages is not re-reading them", function()
+    local rows = {}
+    for p = 1, 100 do rows[#rows + 1] = row(p, 100, 1, 60) end
+    -- Day 2: pages back to 20 at a second each, looking for a passage.
+    for p = 20, 40 do rows[#rows + 1] = row(p, 100, 2, 1) end
+    eq(F.rereads(rows, 100), {})
+end)
+
+t.test("paging through to the end at a second a page does not finish a book", function()
+    local rows = {}
+    for p = 1, 120 do rows[#rows + 1] = row(p, 300, 1, 60) end
+    for p = 121, 300 do rows[#rows + 1] = row(p, 300, 1, 1) end
+    near(F.progress(rows, 300), 120 / 300)
+    eq(F.status(F.progress(rows, 300), 0, 0), "reading")
+end)
+
+t.test("floating point does not spill a page into its neighbours", function()
+    -- (7 - 1) / 25 * 25 and 7 / 25 * 25 are not exact in binary.
+    local _s, read = F.buckets({ row(7, 25, 0, 60) }, 25)
+    eq(read, { [7] = true })
+    local _s2, read2 = F.buckets({ row(27, 46, 0, 60) }, 46)
+    eq(read2, { [27] = true })
+    near(F.progress({ row(1, 46, 0, 60), row(27, 46, 0, 60) }, 46), 1 / 46)
+end)
+
+t.test("no page of any size spills into a neighbour", function()
+    for tp = 1, 400 do
+        for p = 1, tp do
+            local _s, read = F.buckets({ row(p, tp, 0, 60) }, tp)
+            local n = 0
+            for _k in pairs(read) do n = n + 1 end
+            if n ~= 1 or not read[p] then
+                error(("page %d of %d touched %d buckets"):format(p, tp, n), 0)
+            end
+        end
+    end
+end)
+
+t.test("one page of an older, smaller-font layout does not finish a book", function()
+    -- Read 1..200 of the current 450 pages, then one look at the last page
+    -- of the old 100-page layout, which spans current pages 446..450.
+    local rows = {}
+    for p = 1, 200 do rows[#rows + 1] = row(p, 450, 1, 60) end
+    rows[#rows + 1] = row(100, 100, 2, 60)
+    near(F.progress(rows, 450), 200 / 450)
+end)
+
+t.test("the ending read in an older layout still finishes the book", function()
+    local rows = {}
+    for p = 1, 98 do rows[#rows + 1] = row(p, 100, 1, 120) end
+    rows[#rows + 1] = row(99, 100, 2, 120)
+    rows[#rows + 1] = row(100, 100, 2, 120)
+    near(F.progress(rows, 450), 1)
+end)
+
+t.test("with no page count, the newest layout wins even within one day", function()
+    local book = { id = 1, pages = 0 }
+    local a = { page = 1, total_pages = 300, day = 5, last_seen = 1000 }
+    local b = { page = 1, total_pages = 450, day = 5, last_seen = 2000 }
+    eq(F.currentPages(book, { a, b }), 450)
+    eq(F.currentPages(book, { b, a }), 450)
+end)
+
+t.test("prepare computes re-reads and the slowest stretch once, outside layout", function()
+    local d = { books = { { id = 1, title = "B", pages = 100, last_open = 0 } }, rows = {} }
+    for p = 1, 100 do d.rows[#d.rows + 1] = row(p, 100, 1, 60) end
+    for p = 40, 45 do d.rows[#d.rows + 1] = row(p, 100, 2, 60) end
+    local b = F.prepare(d, 0).books[1]
+    eq(b.rereads, { { from = 40, to = 45 } })
+    eq(b.reread_pages, { from = 40, to = 45 })
+    assert(b.slowest, "slowest computed in prepare")
+end)
+
+t.test("layout lays out only the books the card shows", function()
+    local d = { books = {}, rows = {} }
+    for i = 1, 4 do
+        d.books[i] = { id = i, title = "B" .. i, pages = 10, last_open = i }
+        d.rows[#d.rows + 1] = row(1, 10, 0, 60, i)
+    end
+    local prep = F.prepare(d, 0)
+    eq(#F.layout(prep, 10, Scale, 2), 2)
+    eq(#F.layout(prep, 10, Scale), 4)
 end)
 
 -- ── slowest ────────────────────────────────────────────────────────────────

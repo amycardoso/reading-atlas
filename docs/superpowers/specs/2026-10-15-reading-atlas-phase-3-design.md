@@ -11,8 +11,12 @@
 >   num layout novo, saía como uma barra tracejada.
 > - A legenda é "darker = longer per page · bar below = re-read".
 > - "Terminado a 97%" é medido pelo progresso real, não pela posição mais
->   adiante tocada: uma olhada na última página não termina um livro
->   (`fingerprint.progress`).
+>   adiante tocada: uma olhada na última página, folhear até o fim ou uma
+>   página de um layout antigo não terminam um livro (`fingerprint.progress`).
+>   A releitura usa o mesmo progresso real como referência.
+> - Uma página folheada (< 5 s) num dia não é releitura dela.
+> - O "dia" da regra de releitura é o dia local, não o UTC.
+> - "paused since" inclui o ano quando não é o ano corrente.
 > - A premissa sobre TEXT estava errada: o `lua-ljsqlite3` do KOReader v2026.07
 >   copia TEXT com `ffi.string`. A leitura antes do `close()` continua, como
 >   defesa; ver `CARRY-FORWARD.md`.

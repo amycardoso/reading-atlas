@@ -17,25 +17,46 @@ local function fetch(refresh)
     })
 end
 
--- prepare() once per query result; layout() once per strip width. The host
--- renders the same card at several scales while fitting it, and the layout
--- walks every row of every book.
+-- prepare() once per query result and hour; layout() once per strip width and
+-- book count. The host renders the same card at several scales while fitting
+-- it, and both walk every row of every book.
+--
+-- The hour is part of the key because prepare() reads the clock: "reading"
+-- turns into "paused" after 30 days, and KOReader can stay up for weeks of
+-- suspend and resume on the same query result.
 local _prep_memo = setmetatable({}, { __mode = "k" })
 local _layout_memo = setmetatable({}, { __mode = "k" })
 
 local function prepared(data, now)
+    local hour = math.floor(now / 3600)
     local hit = _prep_memo[data]
-    if hit then return hit end
-    hit = atlas("fingerprint").prepare(data, now)
-    _prep_memo[data] = hit
-    return hit
+    if hit and hit.hour == hour then return hit.prep end
+    local prep = atlas("fingerprint").prepare(data, now)
+    _prep_memo[data] = { hour = hour, prep = prep }
+    return prep
 end
 
-local function laidOut(prep, n)
-    local by_n = _layout_memo[prep]
-    if not by_n then by_n = {}; _layout_memo[prep] = by_n end
-    if not by_n[n] then by_n[n] = atlas("fingerprint").layout(prep, n, atlas("scale")) end
-    return by_n[n]
+local function laidOut(prep, n, count)
+    local memo = _layout_memo[prep]
+    if not memo then memo = {}; _layout_memo[prep] = memo end
+    local key = n .. ":" .. count
+    if not memo[key] then
+        memo[key] = atlas("fingerprint").layout(prep, n, atlas("scale"), count)
+    end
+    return memo[key]
+end
+
+-- Month names through gettext, not os.date("%b"): KOReader leaves LC_TIME in
+-- the C locale, so os.date would answer in English whatever the UI language.
+local MONTHS = { _("Jan"), _("Feb"), _("Mar"), _("Apr"), _("May"), _("Jun"),
+    _("Jul"), _("Aug"), _("Sep"), _("Oct"), _("Nov"), _("Dec") }
+
+-- "Mar" within the current year, "Mar 2025" before it: a book paused for
+-- more than a year must not read as paused this spring.
+local function since(t, now)
+    local d = os.date("*t", t)
+    if d.year == os.date("*t", now).year then return MONTHS[d.month] end
+    return string.format("%s %d", MONTHS[d.month], d.year)
 end
 
 local function hours(secs)
@@ -52,7 +73,7 @@ local function meta(b)
 end
 
 -- The line under the strip.
-local function note(strip)
+local function note(strip, now)
     local b = strip.book
     local parts = {}
     local s = strip.slowest
@@ -67,7 +88,7 @@ local function note(strip)
     if b.status == "reading" then
         parts[#parts + 1] = _("reading")
     elseif b.status == "paused" then
-        parts[#parts + 1] = string.format(_("paused since %s"), os.date("%b", b.last_open))
+        parts[#parts + 1] = string.format(_("paused since %s"), since(b.last_open, now))
     end
     return table.concat(parts, " · ")
 end
@@ -93,7 +114,8 @@ local function render(ctx)
             sub = _("KOReader's statistics plugin has no data yet.") }
     end
 
-    local prep = prepared(data, os.time())
+    local now = os.time()
+    local prep = prepared(data, now)
     if #prep.books == 0 then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
             heading = HEADING, value = _("Not enough reading yet"),
@@ -128,7 +150,7 @@ local function render(ctx)
     local fit = ctx.height and math.floor((ctx.height - chrome) / block_h) or 4
     fit = math.max(1, math.min(fit, #prep.books))
 
-    local strips = laidOut(prep, width)
+    local strips = laidOut(prep, width, fit)
     local SW = atlas("stripwidget")
 
     local vg = VerticalGroup:new{ align = "left", heading, VerticalSpan:new{ width = sc(6) } }
@@ -146,7 +168,7 @@ local function render(ctx)
         vg[#vg + 1] = VerticalSpan:new{ width = sc(2) }
         vg[#vg + 1] = SW.new{ width = width, strip_h = strip_h, tick_h = tick_h,
             gap = gap, min_tick = min_tick, levels = s.levels, rereads = s.rereads }
-        vg[#vg + 1] = TextWidget:new{ text = note(s), face = sface,
+        vg[#vg + 1] = TextWidget:new{ text = note(s, now), face = sface,
             fgcolor = Kit.COLOR_MUTED, max_width = width }
         vg[#vg + 1] = VerticalSpan:new{ width = sc(7) }
     end
