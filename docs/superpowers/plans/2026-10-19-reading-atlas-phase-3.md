@@ -17,15 +17,22 @@ I/O, widget e composição, e por último o KOReader de verdade.
   `total_pages` é ignorada; página além do layout é presa à última.
 - `density(rows, n, pages)`: segundos por página **na contagem atual** — o
   tempo do balde dividido pela largura dele em páginas (`pages / n`).
-- `reach(rows)`: a posição mais adiante, 0..1.
+- `reach(rows)`: a posição mais adiante que alguma linha tocou, 0..1. Crua:
+  uma olhada na última página conta. Só serve para limitar a busca da janela
+  mais lenta.
+- `progress(rows, pages)`: até onde o leitor chegou de fato — a página mais
+  adiante com pelo menos metade das páginas lidas numa janela de
+  max(5, 2% do livro) terminando nela. Uma olhada no sumário ou numa nota no
+  fim não conta; pular um apêndice e ler o final conta. (Revisão do PR #5: com
+  `reach`, uma olhada na última página marcava o livro como terminado.)
 - `rereads(rows, n)`: processa por dia, em ordem. Um balde é relido no dia `d`
   se já tinha sido lido num dia anterior **e**, antes de `d`, o leitor já tinha
   chegado a `REREAD_LEAD` (5%) além da página. Intervalos a até
   `REREAD_BRIDGE` (1%) um do outro se juntam.
 - `slowest(rows, pages)`: janela de `max(10, ceil(2% de pages))` páginas com
   mais tempo, só sobre o que foi lido. Empate fica com a primeira.
-- `status(reach, last_open, now)`: terminado a 97%; senão "paused" depois de
-  30 dias sem abrir, "reading" antes.
+- `status(progress, last_open, now)`: terminado a 97% de `progress`; senão
+  "paused" depois de 30 dias sem abrir, "reading" antes.
 - `prepare(data, now)`: agrupa linhas por livro, ordena por `last_open`, corta
   em `MAX_BOOKS` (6). Livro sem `pages` usa o layout da linha mais recente.
 - `layout(prep, n, Scale)`: degrau por balde com **um** conjunto de quartis
@@ -83,5 +90,5 @@ o `REREAD_BRIDGE`.
 
 ## Resultado
 
-14 suítes, 184 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 191 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

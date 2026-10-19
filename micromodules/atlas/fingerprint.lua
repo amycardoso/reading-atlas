@@ -28,6 +28,9 @@ M.REREAD_LEAD = 0.05
 M.REREAD_BRIDGE = 0.01
 -- Finished at 97%: the last pages are often notes, acknowledgements, ads.
 M.FINISHED_AT = 0.97
+-- progress() looks for real reading in a window of this fraction of the book
+-- (at least 5 pages) ending at a page.
+M.PROGRESS_WINDOW = 0.02
 -- Not touched for this long, and not finished: paused, not reading.
 M.PAUSED_AFTER = 30 * DAY
 -- The most books the card ever shows.
@@ -100,7 +103,8 @@ function M.density(rows, n, pages)
     return out
 end
 
--- The furthest position reached, 0..1.
+-- The furthest position any row touched, 0..1. Raw: one look at the last
+-- page counts. Use progress() for how far the reader actually got.
 function M.reach(rows)
     local far = 0
     for i = 1, #rows do
@@ -108,6 +112,29 @@ function M.reach(rows)
         if b and b > far then far = b end
     end
     return far
+end
+
+-- How far the reader actually got, 0..1: the furthest page with real reading
+-- around it, meaning at least half of the PROGRESS_WINDOW pages ending there
+-- were read. A look at the last page (the table of contents, an endnote, how
+-- long the book is) touches one page in that window and does not count;
+-- reading the ending does. Coverage alone would not do: a reader who skips
+-- an appendix or a preface still finished the book.
+function M.progress(rows, pages)
+    local _secs, read = M.buckets(rows, pages)
+    local w = math.max(5, math.ceil(pages * M.PROGRESS_WINDOW))
+    local prefix = { [0] = 0 }
+    for p = 1, pages do prefix[p] = prefix[p - 1] + (read[p] and 1 or 0) end
+    local best = 0
+    for p = 1, pages do
+        if read[p] then
+            -- Near the start the window is shorter, and so is the bar.
+            local lo = math.max(1, p - w + 1)
+            local len = p - lo + 1
+            if prefix[p] - prefix[lo - 1] >= math.ceil(len / 2) then best = p end
+        end
+    end
+    return best / pages
 end
 
 -- Buckets read again after the reader had been well past them, as merged
@@ -214,9 +241,10 @@ function M.slowest(rows, pages)
     return { from = at, to = at + w - 1, secs = best }
 end
 
--- "finished", "reading" or "paused", from the statistics alone.
-function M.status(reach, last_open, now)
-    if reach >= M.FINISHED_AT then return "finished" end
+-- "finished", "reading" or "paused", from the statistics alone. `progress` is
+-- M.progress(), never the raw reach.
+function M.status(progress, last_open, now)
+    if progress >= M.FINISHED_AT then return "finished" end
     if last_open and now and now - last_open >= M.PAUSED_AFTER then return "paused" end
     return "reading"
 end
@@ -237,11 +265,12 @@ function M.prepare(data, now)
         if rows and #rows > 0 then
             local secs = 0
             for j = 1, #rows do secs = secs + (rows[j].secs or 0) end
-            local reach = M.reach(rows)
+            local pages = currentPages(b, rows)
+            local progress = M.progress(rows, pages)
             books[#books + 1] = {
                 id = b.id, title = b.title or "", last_open = b.last_open or 0,
-                pages = currentPages(b, rows), rows = rows, secs = secs,
-                reach = reach, status = M.status(reach, b.last_open, now),
+                pages = pages, rows = rows, secs = secs,
+                progress = progress, status = M.status(progress, b.last_open, now),
             }
         end
     end

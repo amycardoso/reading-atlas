@@ -241,12 +241,61 @@ t.test("prepare orders by last open, newest first, and drops books without rows"
     eq(p.books[2].title, "Old")
 end)
 
-t.test("prepare totals the time and computes reach and status", function()
+t.test("prepare totals the time; page 1 and a look at the last page is not finished", function()
     local p = F.prepare(data(), 60 * DAY)
     local old = p.books[2]
     eq(old.secs, 120)
-    near(old.reach, 1)
-    eq(old.status, "finished")
+    near(old.progress, 0.01)
+    eq(old.status, "paused", "opened 50 days ago and only started")
+end)
+
+-- ── progress ───────────────────────────────────────────────────────────────
+local function readPages(from, to, total, day)
+    local rows = {}
+    for p = from, to do rows[#rows + 1] = row(p, total, day or 0, 60) end
+    return rows
+end
+
+t.test("progress: reading to the end finishes the book", function()
+    local rows = readPages(1, 100, 100)
+    near(F.progress(rows, 100), 1)
+    eq(F.status(F.progress(rows, 100), 0, 0), "finished")
+end)
+
+t.test("progress: one look at the last page does not move it", function()
+    local rows = readPages(1, 30, 100)
+    rows[#rows + 1] = row(100, 100, 0, 15)
+    near(F.progress(rows, 100), 0.30)
+    near(F.reach(rows), 1, "the raw reach still sees the look")
+end)
+
+t.test("progress: a few pages peeked at the back do not count either", function()
+    local rows = readPages(1, 40, 500)
+    -- Endnotes: pages 480, 482 and 490.
+    rows[#rows + 1] = row(480, 500, 0, 30)
+    rows[#rows + 1] = row(482, 500, 0, 30)
+    rows[#rows + 1] = row(490, 500, 0, 30)
+    near(F.progress(rows, 500), 40 / 500)
+end)
+
+t.test("progress: skipping an appendix still finishes the book", function()
+    -- Read 1..80, skip 81..95, read 96..100: not 80% coverage of the end,
+    -- but the ending was read.
+    local rows = readPages(1, 80, 100)
+    for _i, r in ipairs(readPages(96, 100, 100)) do rows[#rows + 1] = r end
+    near(F.progress(rows, 100), 1)
+end)
+
+t.test("progress: a short start counts from the first page", function()
+    near(F.progress(readPages(1, 2, 100), 100), 0.02)
+    eq(F.progress({}, 100), 0)
+end)
+
+t.test("progress: works across a re-pagination", function()
+    -- First half at 200 pages, second half after a font change at 300.
+    local rows = readPages(1, 100, 200)
+    for _i, r in ipairs(readPages(151, 300, 300)) do rows[#rows + 1] = r end
+    near(F.progress(rows, 300), 1)
 end)
 
 t.test("a book with no page count takes its most recent layout", function()

@@ -168,6 +168,16 @@ t.test("a finished book shows its pages, its re-read and no status", function()
     assert(#second.strip.rereads == 1, "one re-read bar")
 end)
 
+t.test("a look at the last page keeps a book in progress, with an honest percentage", function()
+    db_answer = sample()
+    -- Ficciones, read to page 50 of 200, plus one look at page 200.
+    db_answer.rows[#db_answer.rows + 1] =
+        { id_book = 2, page = 200, total_pages = 200, day = 3, secs = 10 }
+    local first = bookParts(settle(ctx()), 1)
+    eq(first.line[2][1].text, "1.3 h · 25%")
+    assert(first.note.text:find("· reading$"), first.note.text)
+end)
+
 t.test("a book in progress says reading; an old one says paused since", function()
     db_answer = sample()
     db_answer.books[2].last_open = NOW - 60 * DAY

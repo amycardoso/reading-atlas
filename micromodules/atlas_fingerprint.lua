@@ -48,7 +48,7 @@ local function meta(b)
     if b.status == "finished" then
         return string.format("%s · %d p.", hours(b.secs), b.pages)
     end
-    return string.format("%s · %d%%", hours(b.secs), math.floor(b.reach * 100))
+    return string.format("%s · %d%%", hours(b.secs), math.floor(b.progress * 100))
 end
 
 -- The line under the strip.
