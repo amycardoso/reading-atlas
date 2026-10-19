@@ -16,10 +16,14 @@ local SQL = [[
     ORDER BY hour;
 ]]
 
--- Returns an array of { hour = n, secs = n }, or nil when there is no
--- readable statistics database. nil is a real answer here -- the caller turns
--- it into the "no statistics" state -- so failures are swallowed by design.
-function M.hourRows()
+-- Opens statistics.sqlite3 read-only, runs fn(conn) and closes it, always.
+-- Returns fn's result, or nil when there is no readable database or anything
+-- raises. nil is a real answer here -- callers turn it into the "no
+-- statistics" state -- so failures are swallowed by design.
+--
+-- fn must turn every value into a plain Lua value before it returns: the
+-- connection is closed right after (see CARRY-FORWARD.md).
+local function withConnection(fn)
     local ok_ds, DataStorage = pcall(require, "datastorage")
     if not ok_ds then return nil end
     local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
@@ -28,25 +32,33 @@ function M.hourRows()
     if not ok_sq then return nil end
 
     local conn
-    local ok, result = pcall(function()
+    local ok, out = pcall(function()
         conn = SQ3.open(path, "ro")
         conn:exec("PRAGMA busy_timeout=200;")
-        return conn:exec(SQL)
+        return fn(conn)
     end)
 
     if conn then pcall(function() conn:close() end) end
 
     if not ok then return nil end
-    if not result or not result[1] then return {} end
-
-    local out = {}
-    for i = 1, #result[1] do
-        out[i] = {
-            hour = tonumber(result[1][i]),
-            secs = tonumber(result[2][i]) or 0,
-        }
-    end
     return out
+end
+
+-- Returns an array of { hour = n, secs = n }, or nil when there is no
+-- readable statistics database.
+function M.hourRows()
+    return withConnection(function(conn)
+        local result = conn:exec(SQL)
+        local out = {}
+        if not result or not result[1] then return out end
+        for i = 1, #result[1] do
+            out[i] = {
+                hour = tonumber(result[1][i]),
+                secs = tonumber(result[2][i]) or 0,
+            }
+        end
+        return out
+    end)
 end
 
 -- ── The fingerprint ─────────────────────────────────────────────────────────
@@ -82,24 +94,13 @@ local function column(result, i, n)
 end
 
 -- Returns { books = { { id, title, pages, last_open } }, rows = { { id_book,
--- page, total_pages, day, secs } } }, or nil when there is no readable
--- statistics database. Never writes.
+-- page, total_pages, day, secs, last_seen } } }, or nil when there is no
+-- readable statistics database. Never writes.
 --
--- book.title is the first TEXT column Reading Atlas reads from this database.
--- Every value is turned into a plain Lua value INSIDE the pcall, before
--- conn:close() -- see CARRY-FORWARD.md.
+-- book.title is the first TEXT column Reading Atlas reads from this database;
+-- like every value, it is converted before withConnection closes.
 function M.fingerprintRows(limit)
-    local ok_ds, DataStorage = pcall(require, "datastorage")
-    if not ok_ds then return nil end
-    local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
-
-    local ok_sq, SQ3 = pcall(require, "lua-ljsqlite3/init")
-    if not ok_sq then return nil end
-
-    local conn
-    local ok, out = pcall(function()
-        conn = SQ3.open(path, "ro")
-        conn:exec("PRAGMA busy_timeout=200;")
+    return withConnection(function(conn)
         local books, ids = {}, {}
         local res = conn:exec(string.format(FP_BOOKS, math.floor(limit or 6)))
         for n = 1, (res and res[1] and #res[1] or 0) do
@@ -131,11 +132,6 @@ function M.fingerprintRows(limit)
         end
         return { books = books, rows = rows }
     end)
-
-    if conn then pcall(function() conn:close() end) end
-
-    if not ok then return nil end
-    return out
 end
 
 return M

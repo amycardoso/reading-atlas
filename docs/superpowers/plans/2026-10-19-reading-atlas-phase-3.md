@@ -27,21 +27,22 @@ I/O, widget e composição, e por último o KOReader de verdade.
   foram lidas. Uma olhada no sumário, folhear até o fim, ou uma página de um
   layout antigo de fonte menor (que cobre várias páginas atuais) não contam;
   pular um apêndice e ler o final conta.
-- `rereads(rows, pages)`: em páginas da contagem atual, por dia local, em
-  ordem. Uma página é relida no dia `d` se já tinha sido lida num dia
-  anterior, se foi lida (não folheada) naquele dia, e se antes de `d` o
-  leitor tinha chegado **de fato** (`progress`, não o alcance cru) a
-  `REREAD_LEAD` (5%) além dela. Intervalos a até `REREAD_BRIDGE` (1%) um do
-  outro se juntam.
+- `analyze(rows, pages)`: uma passada, por dia local, em ordem, que devolve
+  o progresso e as releituras (`rereads(rows, pages)` é atalho). Uma página é
+  relida no dia `d` se já tinha sido **lida** (não folheada) num dia anterior,
+  se é lida de novo em `d`, e se antes de `d` o leitor tinha chegado **de
+  fato** (a fronteira, não o alcance cru) a `REREAD_LEAD` (5%) além dela.
+  Intervalos a até `REREAD_BRIDGE` (1%) um do outro se juntam. A fronteira é
+  incremental.
 - `toBuckets(iv, pages, n)`: intervalo de páginas → baldes da faixa, para a
   barra de releitura.
 - `slowest(rows, pages)`: janela de `max(10, ceil(2% de pages))` páginas com
   mais tempo, só sobre o que foi lido. Empate fica com a primeira.
 - `status(progress, last_open, now)`: terminado a 97% de `progress`; senão
-  "paused" depois de 30 dias sem abrir, "reading" antes.
-- `prepare(data, now)`: agrupa linhas por livro, ordena por `last_open`, corta
-  em `MAX_BOOKS` (6), e calcula uma vez o que não depende da largura:
-  progresso, status, releituras e trecho mais lento. Livro sem `pages` usa o
+  "paused" depois de 30 dias sem abrir, "reading" antes. Chamado no render.
+- `prepare(data)`: agrupa linhas por livro, ordena por `last_open`, corta
+  em `MAX_BOOKS` (6), e calcula uma vez o que não depende da largura nem do
+  relógio: progresso, releituras e trecho mais lento. Livro sem `pages` usa o
   layout com o `last_seen` mais recente.
 - `layout(prep, n, Scale, count)`: só para os `count` livros que o card mostra.
   Degrau por balde com **um** conjunto de quartis para esses livros; folhear
@@ -79,10 +80,9 @@ Teste: `tests/_test_stripwidget.lua`, incluindo a herança de `Widget`.
 ### 4. `micromodules/atlas_fingerprint.lua`
 
 Composição: estados (Reading…, No statistics, Not enough reading yet), e por
-livro título + meta, faixa e nota, e a legenda. `prepare` é memoizado por
-resultado de consulta **e hora** (o status depende do relógio, e o KOReader
-pode ficar semanas ligado com o mesmo resultado), e `layout` por largura e
-número de livros, porque o host renderiza o mesmo card várias vezes ao
+livro título + meta, faixa e nota, e a legenda. A consulta tem `max_age` de
+uma hora. `prepare` é memoizado por resultado de consulta, o status é
+calculado no render, e `layout` é memoizado por largura e número de livros, porque o host renderiza o mesmo card várias vezes ao
 ajustar a escala. "paused since" usa nomes de mês via gettext e inclui o ano
 quando não é o ano corrente. Quantos livros cabem sai de
 `ctx.height` dividido pela altura fixa de um livro, entre 1 e 6. O preview do
@@ -129,7 +129,31 @@ corrigidos com um teste que falha no código anterior:
 9. `toPages` não era usado em produção; virou `toBuckets`, que é.
 10. "paused since Mar" não dizia o ano, e o mês vinha do locale C.
 
+Uma segunda rodada da revisão achou mais sete:
+
+1. O resultado da consulta nunca era renovado com o KOReader ligado, então
+   um livro lido todo dia virava "paused". `source.getKeyed` ganhou
+   `max_age`: depois dele, devolve o resultado antigo enquanto uma consulta
+   nova roda fora do paint, e uma renovação que falha mantém o último
+   resultado bom. A impressão digital re-lê o banco de hora em hora.
+2. Uma página folheada antes e lida de verdade depois contava como relida.
+   Agora só leitura de verdade marca o primeiro dia de uma página.
+3. A fonte de uma linha era identificada pela página crua, não pela presa ao
+   layout: página 301 de 300 contava como uma segunda fonte.
+4. `prepare` era refeito a cada hora só por causa do status. Agora `prepare`
+   não lê o relógio, e o status é calculado no render.
+5. `progress` e as releituras faziam a mesma contagem duas vezes; agora
+   `analyze` faz uma e devolve as duas coisas.
+6. A fronteira era recalculada do zero a cada dia de leitura, O(dias ×
+   páginas). Como toda contagem só cresce, a fronteira só avança: agora ela é
+   mantida de forma incremental, re-checando só as páginas cuja janela tocou o
+   que mudou. Um teste confere contra a definição, dia a dia, em livros
+   aleatórios — e foi esse teste que achou que `spill` precisava contar
+   fontes, não só marcar que havia uma.
+7. A abertura e o fechamento da conexão estavam duplicados em `db.lua`;
+   agora `withConnection` serve às duas consultas.
+
 ## Resultado
 
-14 suítes, 204 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 213 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

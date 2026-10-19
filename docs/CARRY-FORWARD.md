@@ -163,3 +163,10 @@ is what the `pcall`s are for, and `tests/_test_library.lua` holds them to it.
 
 Like phase 1's statistics, each axis is cached for the life of the process.
 A book finished or added after the first render shows up after a restart.
+
+The fingerprint is the exception: its status ("reading" turning into "paused"
+after 30 days) depends on `book.last_open`, so a result kept for weeks of
+suspend and resume would call a book read every day paused. It passes
+`max_age = 3600` to `source.getKeyed`, which serves the old result while a
+fresh query runs off the paint path. Phase 1 and the map could opt in the
+same way if a stale card ever matters there.

@@ -17,6 +17,9 @@
 > - Uma página folheada (< 5 s) num dia não é releitura dela.
 > - O "dia" da regra de releitura é o dia local, não o UTC.
 > - "paused since" inclui o ano quando não é o ano corrente.
+> - A consulta é renovada de hora em hora (`max_age` em `source.lua`), em vez
+>   de uma vez por sessão do KOReader: o status depende de `last_open`, e um
+>   resultado de semanas atrás fazia um livro lido todo dia parecer pausado.
 > - A premissa sobre TEXT estava errada: o `lua-ljsqlite3` do KOReader v2026.07
 >   copia TEXT com `ffi.string`. A leitura antes do `close()` continua, como
 >   defesa; ver `CARRY-FORWARD.md`.

@@ -175,4 +175,69 @@ t.test("peek returns the settled value after a query lands", function()
     eq(Source.peek("map:genre"), rows)
 end)
 
+-- ── max_age ────────────────────────────────────────────────────────────────
+-- A key with max_age re-queries once its result is old, but never makes the
+-- card fall back to "Reading…" in the meantime.
+
+local function agedDeps(results)
+    local clock, n = 1000, 0
+    local d = makeDeps(function() n = n + 1; return results[n] end)
+    d.deps.accept = function(r) return r ~= nil end
+    d.deps.max_age = 3600
+    d.deps.now = function() return clock end
+    d.advance = function(secs) clock = clock + secs end
+    d.calls = function() return n end
+    return d
+end
+
+t.test("a fresh result is served without re-querying", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, { "b" } })
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(3599)
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a")
+    eq(d.pendingCount(), 0, "not stale yet")
+end)
+
+t.test("a stale result is served while a fresh query runs off the paint path", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, { "b" } })
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(3600)
+    local refreshed = 0
+    eq(Source.getKeyed("fp", function() refreshed = refreshed + 1 end, d.deps)[1], "a",
+        "stale data, never nil")
+    eq(d.calls(), 1, "the new query must not run inside render")
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a", "a second render does not queue twice")
+    eq(d.pendingCount(), 1)
+    d.run()
+    eq(refreshed, 1, "the card is told to redraw")
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "b")
+end)
+
+t.test("a failed refresh keeps the last good result and waits another max_age", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, nil })
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(4000)
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a")
+    eq(d.pendingCount(), 0, "not retried on every render")
+end)
+
+t.test("without max_age a key is queried once per session, as before", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, { "b" } })
+    d.deps.max_age = nil
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(10 * 86400)
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a")
+    eq(d.pendingCount(), 0)
+end)
+
 t.done()

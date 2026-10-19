@@ -247,7 +247,7 @@ t.test("prepare computes re-reads and the slowest stretch once, outside layout",
     local d = { books = { { id = 1, title = "B", pages = 100, last_open = 0 } }, rows = {} }
     for p = 1, 100 do d.rows[#d.rows + 1] = row(p, 100, 1, 60) end
     for p = 40, 45 do d.rows[#d.rows + 1] = row(p, 100, 2, 60) end
-    local b = F.prepare(d, 0).books[1]
+    local b = F.prepare(d).books[1]
     eq(b.rereads, { { from = 40, to = 45 } })
     eq(b.reread_pages, { from = 40, to = 45 })
     assert(b.slowest, "slowest computed in prepare")
@@ -259,7 +259,7 @@ t.test("layout lays out only the books the card shows", function()
         d.books[i] = { id = i, title = "B" .. i, pages = 10, last_open = i }
         d.rows[#d.rows + 1] = row(1, 10, 0, 60, i)
     end
-    local prep = F.prepare(d, 0)
+    local prep = F.prepare(d)
     eq(#F.layout(prep, 10, Scale, 2), 2)
     eq(#F.layout(prep, 10, Scale), 4)
 end)
@@ -331,18 +331,19 @@ local function data()
 end
 
 t.test("prepare orders by last open, newest first, and drops books without rows", function()
-    local p = F.prepare(data(), 60 * DAY)
+    local p = F.prepare(data())
     eq(#p.books, 2)
     eq(p.books[1].title, "New")
     eq(p.books[2].title, "Old")
 end)
 
 t.test("prepare totals the time; page 1 and a look at the last page is not finished", function()
-    local p = F.prepare(data(), 60 * DAY)
+    local p = F.prepare(data())
     local old = p.books[2]
     eq(old.secs, 120)
     near(old.progress, 0.01)
-    eq(old.status, "paused", "opened 50 days ago and only started")
+    eq(F.status(old.progress, old.last_open, 60 * DAY), "paused",
+        "opened 50 days ago and only started")
 end)
 
 -- ── progress ───────────────────────────────────────────────────────────────
@@ -395,7 +396,7 @@ t.test("progress: works across a re-pagination", function()
 end)
 
 t.test("a book with no page count takes its most recent layout", function()
-    local p = F.prepare(data(), 60 * DAY)
+    local p = F.prepare(data())
     eq(p.books[1].pages, 200)
 end)
 
@@ -405,7 +406,7 @@ t.test("prepare keeps at most MAX_BOOKS", function()
         d.books[i] = { id = i, title = "B" .. i, pages = 10, last_open = i }
         d.rows[i] = row(1, 10, 0, 60, i)
     end
-    local p = F.prepare(d, 0)
+    local p = F.prepare(d)
     eq(#p.books, F.MAX_BOOKS)
     eq(p.books[1].title, "B9")
 end)
@@ -420,7 +421,7 @@ t.test("layout shares one scale across books, so a slow book reads darker", func
         d.rows[#d.rows + 1] = row(p, 100, 0, 30 + p % 7, 1)
         d.rows[#d.rows + 1] = row(p, 100, 0, 300 + p % 7, 2)
     end
-    local strips = F.layout(F.prepare(d, 0), 50, Scale)
+    local strips = F.layout(F.prepare(d), 50, Scale)
     local easy, hard = strips[1].levels, strips[2].levels
     for k = 1, 50 do
         assert(easy[k] <= 2, "easy bucket " .. k .. " is " .. tostring(easy[k]))
@@ -432,7 +433,7 @@ t.test("layout: flipped-past stretches are step 0, unread are nil", function()
     local d = { books = { { id = 1, title = "B", pages = 10, last_open = 0 } }, rows = {
         row(1, 10, 0, 60), row(2, 10, 0, 2), row(3, 10, 0, 60),
     } }
-    local s = F.layout(F.prepare(d, 0), 10, Scale)[1]
+    local s = F.layout(F.prepare(d), 10, Scale)[1]
     eq(s.levels[2], 0)
     assert(s.levels[1] >= 1)
     eq(s.levels[4], nil)
@@ -442,10 +443,116 @@ t.test("layout names the re-read in pages and the slowest stretch", function()
     local d = { books = { { id = 1, title = "B", pages = 100, last_open = 0 } }, rows = {} }
     for p = 1, 100 do d.rows[#d.rows + 1] = row(p, 100, 1, 60) end
     for p = 40, 45 do d.rows[#d.rows + 1] = row(p, 100, 2, 60) end
-    local s = F.layout(F.prepare(d, 0), 50, Scale)[1]
+    local s = F.layout(F.prepare(d), 50, Scale)[1]
     eq(s.reread_pages, { from = 40, to = 45 })
     eq(s.rereads, { { from = 20, to = 23 } })
     eq(s.slowest.from, 36, "the re-read stretch is where the most time went")
+end)
+
+-- ── review findings, round 2 ───────────────────────────────────────────────
+t.test("a stretch skimmed first and read properly later is not a re-read", function()
+    local rows = {}
+    -- Day 1: flips through 51..69 (skipping a chapter), reads 1..50 and 70..200.
+    for p = 1, 50 do rows[#rows + 1] = row(p, 200, 1, 60) end
+    for p = 51, 69 do rows[#rows + 1] = row(p, 200, 1, 1) end
+    for p = 70, 200 do rows[#rows + 1] = row(p, 200, 1, 60) end
+    -- Day 5: goes back and reads 51..69 for the first time.
+    for p = 51, 69 do rows[#rows + 1] = row(p, 200, 5, 60) end
+    eq(F.rereads(rows, 200), {})
+end)
+
+t.test("an out-of-range page is the same source as the page it clamps to", function()
+    -- In an old 60-page layout, page 60 covers current pages 296..300 of 300,
+    -- so it fills the half rule alone; recorded again as page 61 (clamped to
+    -- 60), it must still be ONE source, and one look must not finish a book.
+    local rows = {}
+    for p = 1, 100 do rows[#rows + 1] = row(p, 300, 1, 60) end
+    rows[#rows + 1] = row(60, 60, 2, 300)
+    rows[#rows + 1] = row(61, 60, 3, 300)
+    near(F.progress(rows, 300), 100 / 300)
+end)
+
+t.test("analyze returns the same progress as progress()", function()
+    local rows = {}
+    for p = 1, 140 do rows[#rows + 1] = row(p, 300, 1 + p % 9, 60) end
+    rows[#rows + 1] = row(300, 300, 20, 30)
+    near(F.analyze(rows, 300).progress, F.progress(rows, 300))
+end)
+
+-- A brute-force frontier, straight from the definition, to hold the
+-- incremental one to.
+local function bruteProgress(rows, pages)
+    local secs, starts, spans, seen = {}, {}, {}, {}
+    for p = 1, pages do secs[p] = 0; starts[p] = 0 end
+    for _i, r in ipairs(rows) do
+        local tp = r.total_pages
+        local pg = math.max(1, math.min(r.page, tp))
+        local a, b = (pg - 1) / tp * pages, pg / tp * pages
+        local first, last
+        for k = math.floor(a) + 1, math.min(pages, math.ceil(b)) do
+            local ov = math.min(b, k) - math.max(a, k - 1)
+            if ov > 1e-9 then
+                secs[k] = secs[k] + r.secs * ov / (b - a)
+                first = first or k; last = k
+            end
+        end
+        local key = pg .. ":" .. tp
+        if first and not seen[key] then
+            seen[key] = true
+            starts[first] = starts[first] + 1
+            spans[#spans + 1] = { first, last }
+        end
+    end
+    local w = math.max(5, math.ceil(pages * F.PROGRESS_WINDOW))
+    local best = 0
+    for p = 1, pages do
+        if secs[p] >= F.SKIM_SECS then
+            local lo = math.max(1, p - w + 1)
+            local reads, sources = 0, 0
+            for q = lo, p do if secs[q] >= F.SKIM_SECS then reads = reads + 1 end end
+            for _i, sp in ipairs(spans) do
+                if sp[1] <= p and sp[2] >= lo then sources = sources + 1 end
+            end
+            if reads >= math.ceil((p - lo + 1) / 2) and sources >= math.min(2, p - lo + 1) then
+                best = p
+            end
+        end
+    end
+    return best / pages
+end
+
+t.test("the incremental frontier matches the definition, day after day", function()
+    math.randomseed(7)
+    for trial = 1, 40 do
+        local pages = math.random(20, 400)
+        local rows = {}
+        for d = 1, math.random(1, 25) do
+            local tp = (math.random() < 0.3) and math.random(10, 600) or pages
+            local from = math.random(1, tp)
+            for p = from, math.min(tp, from + math.random(0, 30)) do
+                rows[#rows + 1] = row(p, tp, d, math.random(0, 3) == 0 and 2 or 60)
+            end
+            -- The incremental pass sees days in order; check it each day.
+            local got = F.analyze(rows, pages).progress
+            local want = bruteProgress(rows, pages)
+            if math.abs(got - want) > 1e-9 then
+                error(("trial %d day %d: got %s, want %s"):format(trial, d, got, want), 0)
+            end
+        end
+    end
+end)
+
+t.test("a long book read over many days analyzes quickly", function()
+    local rows = {}
+    -- 1500 pages over 300 days, five pages a day.
+    for d = 1, 300 do
+        for p = (d - 1) * 5 + 1, d * 5 do rows[#rows + 1] = row(p, 1500, d, 60) end
+    end
+    local t0 = os.clock()
+    local an = F.analyze(rows, 1500)
+    local spent = os.clock() - t0
+    near(an.progress, 1)
+    assert(spent < 0.5, ("took %.3f s"):format(spent))
 end)
 
 t.done()

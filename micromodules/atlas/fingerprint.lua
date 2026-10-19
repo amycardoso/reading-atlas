@@ -39,11 +39,13 @@ M.PAUSED_AFTER = 30 * DAY
 -- The most books the card ever shows.
 M.MAX_BOOKS = 6
 
+-- The stretch [a, b) of the book a row covers, and its page clamped into
+-- the row's layout (page 0, nil or past the end all mean an edge page).
 local function rowSpan(row)
     local tp = row.total_pages
     if not tp or tp < 1 then return nil end
     local p = math.max(1, math.min(row.page or 1, tp))
-    return (p - 1) / tp, p / tp
+    return (p - 1) / tp, p / tp, p
 end
 
 -- Calls fn(k, fraction) for each of n equal buckets the span [a, b) overlaps,
@@ -125,35 +127,8 @@ end
 -- A tally of rows at page resolution (the book's current count), built up one
 -- row at a time so the re-read rule can ask "how far had the reader really got
 -- before this day?".
-local function newTally(pages)
-    local st = { pages = pages, secs = {}, starts = {}, ends = {}, seen = {} }
-    for p = 1, pages do st.secs[p] = 0; st.starts[p] = 0; st.ends[p] = 0 end
-    return st
-end
-
--- Adds a row. Each distinct page of each layout counts once as a source, at
--- the first current page it covers, so the window rule can tell one look at a
--- page from several pages read.
-local function tallyRow(st, r)
-    local a, b = rowSpan(r)
-    if not a then return end
-    local s = r.secs or 0
-    local first, last
-    spread(a, b, st.pages, function(p, f)
-        st.secs[p] = st.secs[p] + s * f
-        first = first or p
-        last = p
-    end)
-    if not first then return end
-    local key = (r.page or 0) .. ":" .. r.total_pages
-    if not st.seen[key] then
-        st.seen[key] = true
-        st.starts[first] = st.starts[first] + 1
-        if last > st.ends[first] then st.ends[first] = last end
-    end
-end
-
--- How far the reader really got, 0..1, from a tally: the furthest page that
+--
+-- How far the reader really got is the furthest page that
 --   * was read, not flipped past (SKIM_SECS a page or more), and
 --   * ends a window of max(5 pages, PROGRESS_WINDOW of the book) in which at
 --     least half the pages were read, coming from at least two different
@@ -163,31 +138,67 @@ end
 -- the end from counting; the two-sources rule keeps one page of an old,
 -- smaller-font layout -- which spans several current pages -- from counting.
 -- Coverage alone would not do: a reader who skips an appendix still finished.
+--
+-- Every count in the tally only grows, so a page that qualifies stays
+-- qualified and the frontier never moves back. That is what lets it be kept
+-- incrementally: after new rows, only pages whose window touches what changed
+-- are re-checked, instead of the whole book after every reading day.
+local function newTally(pages)
+    local st = {
+        pages = pages, w = math.max(5, math.ceil(pages * M.PROGRESS_WINDOW)),
+        secs = {}, starts = {}, spill = {}, seen = {}, best = 0,
+    }
+    for p = 1, pages do st.secs[p] = 0; st.starts[p] = 0; st.spill[p] = 0 end
+    return st
+end
+
+-- Adds a row. Each distinct page of each layout counts once as a source, at
+-- the first current page it covers; spill[q] counts the sources that started
+-- before page q and still cover it, so the sources a window [lo, p] sees are
+-- exactly the starts inside it plus spill[lo].
+local function tallyRow(st, r)
+    local a, b, page = rowSpan(r)
+    if not a then return end
+    local s = r.secs or 0
+    local first, last
+    spread(a, b, st.pages, function(p, f)
+        st.secs[p] = st.secs[p] + s * f
+        first = first or p
+        last = p
+    end)
+    if not first then return end
+    local key = page .. ":" .. r.total_pages
+    if not st.seen[key] then
+        st.seen[key] = true
+        st.starts[first] = st.starts[first] + 1
+        for q = first + 1, last do st.spill[q] = st.spill[q] + 1 end
+    end
+    if not st.lo or first < st.lo then st.lo = first end
+    if not st.hi or last > st.hi then st.hi = last end
+end
+
+local function qualifies(st, p)
+    if st.secs[p] < M.SKIM_SECS then return false end
+    local lo = math.max(1, p - st.w + 1)
+    local len = p - lo + 1
+    local reads, sources = 0, st.spill[lo]
+    for q = lo, p do
+        if st.secs[q] >= M.SKIM_SECS then reads = reads + 1 end
+        sources = sources + st.starts[q]
+    end
+    return reads >= math.ceil(len / 2) and sources >= math.min(2, len)
+end
+
+-- The frontier, 0..1, after the rows tallied so far.
 local function frontier(st)
-    local pages = st.pages
-    local w = math.max(5, math.ceil(pages * M.PROGRESS_WINDOW))
-    local pread, pstart, maxend = { [0] = 0 }, { [0] = 0 }, { [0] = 0 }
-    for p = 1, pages do
-        local real = st.secs[p] >= M.SKIM_SECS
-        pread[p] = pread[p - 1] + (real and 1 or 0)
-        pstart[p] = pstart[p - 1] + st.starts[p]
-        maxend[p] = math.max(maxend[p - 1], st.ends[p])
-    end
-    local best = 0
-    for p = 1, pages do
-        if st.secs[p] >= M.SKIM_SECS then
-            -- Near the start the window is shorter, and so is the bar.
-            local lo = math.max(1, p - w + 1)
-            local len = p - lo + 1
-            local sources = pstart[p] - pstart[lo - 1]
-            if lo > 1 and maxend[lo - 1] >= lo then sources = sources + 1 end
-            if pread[p] - pread[lo - 1] >= math.ceil(len / 2)
-                    and sources >= math.min(2, len) then
-                best = p
-            end
+    if st.lo then
+        local top = math.min(st.pages, st.hi + st.w - 1)
+        for p = top, math.max(st.lo, st.best + 1), -1 do
+            if qualifies(st, p) then st.best = p; break end
         end
+        st.lo, st.hi = nil, nil
     end
-    return best / pages
+    return st.best / st.pages
 end
 
 function M.progress(rows, pages)
@@ -209,18 +220,20 @@ local function byDay(rows)
     return by_day, days
 end
 
--- Pages read again after the reader had been well past them, as merged
--- { from, to } intervals in the book's current page count.
+-- Real progress, and the pages read again after the reader had been well past
+-- them, as merged { from, to } intervals in the book's current page count.
+-- One pass, one tally: the frontier after the last day IS the progress.
 --
 -- A page is re-read on day d when
---   * it was already read on an earlier day,
---   * that day it was read, not flipped past (SKIM_SECS or more), and
---   * before d, the reader had REALLY got (frontier(), not the raw reach) at
+--   * it was READ (not flipped past) on an earlier day -- an earlier skim
+--     makes today's reading the first, not a second,
+--   * it is read, not flipped past, again on d, and
+--   * before d, the reader had REALLY got (the frontier, not the raw reach) at
 --     least REREAD_LEAD further on.
 -- The last condition keeps the page where one session ends and the next
 -- begins from counting, and a look at the end of the book from turning every
 -- later session start into a re-read.
-function M.rereads(rows, pages)
+function M.analyze(rows, pages)
     local by_day, days = byDay(rows)
     local st = newTally(pages)
     local first_day, marked = {}, {}
@@ -236,11 +249,13 @@ function M.rereads(rows, pages)
             end
         end
         for p, s in pairs(today) do
-            if first_day[p] and first_day[p] < d and s >= M.SKIM_SECS
-                    and far_before >= p / pages + M.REREAD_LEAD then
-                marked[p] = true
+            if s >= M.SKIM_SECS then
+                if first_day[p] and first_day[p] < d
+                        and far_before >= p / pages + M.REREAD_LEAD then
+                    marked[p] = true
+                end
+                if not first_day[p] then first_day[p] = d end
             end
-            if not first_day[p] then first_day[p] = d end
         end
         for _j, r in ipairs(list) do tallyRow(st, r) end
         far_before = frontier(st)
@@ -264,7 +279,11 @@ function M.rereads(rows, pages)
         end
         k = k + 1
     end
-    return out
+    return { progress = far_before, rereads = out }
+end
+
+function M.rereads(rows, pages)
+    return M.analyze(rows, pages).rereads
 end
 
 -- The largest interval, or nil. Ties go to the first.
@@ -312,9 +331,10 @@ function M.status(progress, last_open, now)
 end
 
 -- Books with their rows, most recently opened first, at most MAX_BOOKS.
--- Everything that does not depend on the strip's width is computed here, once
--- per query: progress, status, re-reads and the slowest stretch.
-function M.prepare(data, now)
+-- Everything that depends on neither the strip's width nor the clock is
+-- computed here, once per query: progress, re-reads and the slowest stretch.
+-- The status reads the clock, so the card asks status() at render time.
+function M.prepare(data)
     local by_book = {}
     for i = 1, #(data.rows or {}) do
         local r = data.rows[i]
@@ -329,13 +349,11 @@ function M.prepare(data, now)
             local secs = 0
             for j = 1, #rows do secs = secs + (rows[j].secs or 0) end
             local pages = currentPages(b, rows)
-            local progress = M.progress(rows, pages)
-            local rereads = M.rereads(rows, pages)
+            local an = M.analyze(rows, pages)
             books[#books + 1] = {
                 id = b.id, title = b.title or "", last_open = b.last_open or 0,
-                pages = pages, rows = rows, secs = secs,
-                progress = progress, status = M.status(progress, b.last_open, now),
-                rereads = rereads, reread_pages = M.largest(rereads),
+                pages = pages, rows = rows, secs = secs, progress = an.progress,
+                rereads = an.rereads, reread_pages = M.largest(an.rereads),
                 slowest = M.slowest(rows, pages),
             }
         end

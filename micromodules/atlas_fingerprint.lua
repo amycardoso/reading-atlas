@@ -9,31 +9,34 @@ local _ = require("lib/bookshelf_i18n").gettext
 
 local HEADING = _("Atlas fingerprint")
 
+-- Re-read the database at most hourly. Without it, a KOReader left up for
+-- weeks of suspend and resume would keep the first answer: last_open frozen,
+-- so a book read every day would drift to "paused", with weeks-old progress.
+local MAX_AGE = 3600
+
 local function fetch(refresh)
     return atlas("source").getKeyed("fingerprint", refresh, {
         query = function() return atlas("db").fingerprintRows(atlas("fingerprint").MAX_BOOKS) end,
         -- No books is data (read a little more), not "no database" (nil).
         accept = function(result) return result ~= nil end,
+        max_age = MAX_AGE,
     })
 end
 
--- prepare() once per query result and hour; layout() once per strip width and
--- book count. The host renders the same card at several scales while fitting
--- it, and both walk every row of every book.
---
--- The hour is part of the key because prepare() reads the clock: "reading"
--- turns into "paused" after 30 days, and KOReader can stay up for weeks of
--- suspend and resume on the same query result.
+-- prepare() once per query result; layout() once per strip width and book
+-- count. The host renders the same card at several scales while fitting it,
+-- and both walk every row of every book. Neither reads the clock: the status
+-- does, so it is asked for at render time.
 local _prep_memo = setmetatable({}, { __mode = "k" })
 local _layout_memo = setmetatable({}, { __mode = "k" })
 
-local function prepared(data, now)
-    local hour = math.floor(now / 3600)
+local function prepared(data)
     local hit = _prep_memo[data]
-    if hit and hit.hour == hour then return hit.prep end
-    local prep = atlas("fingerprint").prepare(data, now)
-    _prep_memo[data] = { hour = hour, prep = prep }
-    return prep
+    if not hit then
+        hit = atlas("fingerprint").prepare(data)
+        _prep_memo[data] = hit
+    end
+    return hit
 end
 
 local function laidOut(prep, n, count)
@@ -64,9 +67,13 @@ local function hours(secs)
     return string.format("%d min", math.floor(secs / 60 + 0.5))
 end
 
+local function statusOf(b, now)
+    return atlas("fingerprint").status(b.progress, b.last_open, now)
+end
+
 -- Right-hand side of the title line.
-local function meta(b)
-    if b.status == "finished" then
+local function meta(b, now)
+    if statusOf(b, now) == "finished" then
         return string.format("%s · %d p.", hours(b.secs), b.pages)
     end
     return string.format("%s · %d%%", hours(b.secs), math.floor(b.progress * 100))
@@ -85,9 +92,10 @@ local function note(strip, now)
     if rr then
         parts[#parts + 1] = string.format(_("re-read p. %d–%d"), rr.from, rr.to)
     end
-    if b.status == "reading" then
+    local status = statusOf(b, now)
+    if status == "reading" then
         parts[#parts + 1] = _("reading")
-    elseif b.status == "paused" then
+    elseif status == "paused" then
         parts[#parts + 1] = string.format(_("paused since %s"), since(b.last_open, now))
     end
     return table.concat(parts, " · ")
@@ -115,7 +123,7 @@ local function render(ctx)
     end
 
     local now = os.time()
-    local prep = prepared(data, now)
+    local prep = prepared(data)
     if #prep.books == 0 then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
             heading = HEADING, value = _("Not enough reading yet"),
@@ -157,7 +165,7 @@ local function render(ctx)
     for i = 1, fit do
         local s = strips[i]
         local b = s.book
-        local right = TextWidget:new{ text = meta(b), face = sface, fgcolor = Kit.COLOR_MUTED }
+        local right = TextWidget:new{ text = meta(b, now), face = sface, fgcolor = Kit.COLOR_MUTED }
         local title = TextWidget:new{ text = b.title, face = tface, bold = tbold,
             fgcolor = Kit.COLOR_PRIMARY,
             max_width = math.max(sc(20), width - right:getSize().w - sc(8)) }

@@ -20,7 +20,7 @@
 -- a map from languages to authors can never be answered from the wrong cache.
 local M = {}
 
-local _state = {}   -- key -> { cache = nil|false|table, querying = bool, pending = {} }
+local _state = {}   -- key -> { cache = nil|false|table, at = time settled, querying = bool, pending = {} }
 
 local function stateFor(key)
     local s = _state[key]
@@ -52,9 +52,47 @@ end
 -- deps.schedule -> defers a function; defaults to UIManager:scheduleIn(0, …).
 -- deps.accept   -> whether a result is usable; defaults to "a non-empty
 --                  array". Anything it rejects, and any error, caches false.
+-- deps.max_age  -> optional seconds after which a settled result is stale.
+--                  A stale result is still returned -- the card never drops
+--                  back to "Reading…" -- while a fresh query runs off the
+--                  paint thread; its refresh callbacks fire when it lands.
+--                  Without it, a key is queried once per KOReader session.
+-- deps.now      -> the clock for max_age; defaults to os.time.
+local function startQuery(s, deps, revalidating)
+    s.querying = true
+    local schedule = deps.schedule or defaultSchedule
+    local accept = deps.accept or nonEmpty
+    local clock = deps.now or os.time
+    schedule(function()
+        local ok, result = pcall(deps.query)
+        if ok and accept(result) then
+            s.cache = result
+        elseif not revalidating then
+            -- Never leave the cache at nil here, or the module would
+            -- re-query on every single render. A failed REfresh keeps the
+            -- last good result instead: one bad read is no reason to blank
+            -- a card that was showing data.
+            s.cache = false
+        end
+        s.at = clock()
+        s.querying = false
+        local callbacks = s.pending
+        s.pending = {}
+        for i = 1, #callbacks do pcall(callbacks[i]) end
+    end)
+end
+
 function M.getKeyed(key, refresh, deps)
     local s = stateFor(key)
-    if s.cache ~= nil then return s.cache end
+    if s.cache ~= nil then
+        local clock = deps.now or os.time
+        local stale = deps.max_age and s.at and clock() - s.at >= deps.max_age
+        if stale then
+            if refresh then s.pending[#s.pending + 1] = refresh end
+            if not s.querying then startQuery(s, deps, true) end
+        end
+        return s.cache
+    end
     -- Every caller's refresh must survive to the query landing, even callers
     -- that arrive while a query is already in flight (the hero grid and the
     -- start menu can both render the same module in one frame). Collecting
@@ -62,23 +100,7 @@ function M.getKeyed(key, refresh, deps)
     -- that true.
     if refresh then s.pending[#s.pending + 1] = refresh end
     if s.querying then return nil end
-    s.querying = true
-    local schedule = deps.schedule or defaultSchedule
-    local accept = deps.accept or nonEmpty
-    schedule(function()
-        local ok, result = pcall(deps.query)
-        -- Never leave the cache at nil here, or the module would re-query
-        -- on every single render.
-        if ok and accept(result) then
-            s.cache = result
-        else
-            s.cache = false
-        end
-        s.querying = false
-        local callbacks = s.pending
-        s.pending = {}
-        for i = 1, #callbacks do pcall(callbacks[i]) end
-    end)
+    startQuery(s, deps, false)
     return nil
 end
 
