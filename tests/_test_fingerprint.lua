@@ -9,6 +9,12 @@ local eq = H.eq
 local F = dofile("micromodules/atlas/fingerprint.lua")
 local Scale = dofile("micromodules/atlas/scale.lua")
 
+-- Everything goes through analyze(), the one entry point prepare() uses, so
+-- these tests pin down what the card shows.
+local function progress(rows, pages) return F.analyze(rows, pages).progress end
+local function rereads(rows, pages) return F.analyze(rows, pages).rereads end
+local function slowest(rows, pages) return F.analyze(rows, pages).slowest end
+
 local DAY = 86400
 
 local function row(page, total, day, secs, id)
@@ -89,26 +95,20 @@ t.test("unread buckets have no density at all", function()
     eq(d[2], nil)
 end)
 
--- ── reach ──────────────────────────────────────────────────────────────────
-t.test("reach is the furthest position, whatever the layout", function()
-    near(F.reach({ row(10, 100, 0, 1), row(30, 60, 1, 1), row(20, 100, 2, 1) }), 0.5)
-    eq(F.reach({}), 0)
-end)
-
 -- ── rereads ────────────────────────────────────────────────────────────────
 t.test("going back to an earlier stretch on a later day is a re-read", function()
     local rows = {}
     for p = 1, 100 do rows[#rows + 1] = row(p, 100, 1, 60) end
     -- Day 2: back to pages 20..29.
     for p = 20, 29 do rows[#rows + 1] = row(p, 100, 2, 60) end
-    eq(F.rereads(rows, 100), { { from = 20, to = 29 } })
+    eq(rereads(rows, 100), { { from = 20, to = 29 } })
 end)
 
 t.test("the page where one session ends and the next begins is not a re-read", function()
     local rows = {}
     for p = 1, 30 do rows[#rows + 1] = row(p, 100, 1, 60) end
     for p = 30, 60 do rows[#rows + 1] = row(p, 100, 2, 60) end
-    eq(F.rereads(rows, 100), {})
+    eq(rereads(rows, 100), {})
 end)
 
 t.test("coming back from less than the lead is not a re-read", function()
@@ -116,7 +116,7 @@ t.test("coming back from less than the lead is not a re-read", function()
     for p = 1, 33 do rows[#rows + 1] = row(p, 100, 1, 60) end
     -- Back 3 pages (3%): flipping back to check a name.
     for p = 30, 40 do rows[#rows + 1] = row(p, 100, 2, 60) end
-    eq(F.rereads(rows, 100), {})
+    eq(rereads(rows, 100), {})
 end)
 
 t.test("a stretch jumped past but never read is not re-read when first read", function()
@@ -126,7 +126,7 @@ t.test("a stretch jumped past but never read is not re-read when first read", fu
     rows[#rows + 1] = row(100, 100, 1, 20)
     -- Day 2 reads on from 11 for the first time.
     for p = 11, 30 do rows[#rows + 1] = row(p, 100, 2, 60) end
-    eq(F.rereads(rows, 100), {})
+    eq(rereads(rows, 100), {})
 end)
 
 t.test("neighbouring re-read buckets merge into one interval", function()
@@ -135,7 +135,7 @@ t.test("neighbouring re-read buckets merge into one interval", function()
     for p = 10, 14 do rows[#rows + 1] = row(p, 100, 2, 60) end
     for p = 15, 19 do rows[#rows + 1] = row(p, 100, 3, 60) end
     for p = 50, 52 do rows[#rows + 1] = row(p, 100, 3, 60) end
-    eq(F.rereads(rows, 100), { { from = 10, to = 19 }, { from = 50, to = 52 } })
+    eq(rereads(rows, 100), { { from = 10, to = 19 }, { from = 50, to = 52 } })
 end)
 
 t.test("a re-read with a page skipped is still one re-read", function()
@@ -145,7 +145,7 @@ t.test("a re-read with a page skipped is still one re-read", function()
     for p = 20, 30 do
         if p ~= 25 then rows[#rows + 1] = row(p, 100, 2, 60) end
     end
-    eq(F.rereads(rows, 100), { { from = 20, to = 30 } })
+    eq(rereads(rows, 100), { { from = 20, to = 30 } })
 end)
 
 t.test("a gap wider than the bridge keeps two re-reads apart", function()
@@ -154,7 +154,7 @@ t.test("a gap wider than the bridge keeps two re-reads apart", function()
     for p = 20, 30 do
         if p ~= 25 and p ~= 26 then rows[#rows + 1] = row(p, 100, 2, 60) end
     end
-    eq(F.rereads(rows, 100), { { from = 20, to = 24 }, { from = 27, to = 30 } })
+    eq(rereads(rows, 100), { { from = 20, to = 24 }, { from = 27, to = 30 } })
 end)
 
 t.test("largest picks the widest interval, the first on a tie", function()
@@ -177,7 +177,7 @@ t.test("a look at the end of the book does not turn session starts into re-reads
     rows[#rows + 1] = row(300, 300, 1, 20)
     -- Day 2: resumes at page 50 and reads on.
     for p = 50, 120 do rows[#rows + 1] = row(p, 300, 2, 60) end
-    eq(F.rereads(rows, 300), {})
+    eq(rereads(rows, 300), {})
 end)
 
 t.test("flipping back past pages is not re-reading them", function()
@@ -185,15 +185,15 @@ t.test("flipping back past pages is not re-reading them", function()
     for p = 1, 100 do rows[#rows + 1] = row(p, 100, 1, 60) end
     -- Day 2: pages back to 20 at a second each, looking for a passage.
     for p = 20, 40 do rows[#rows + 1] = row(p, 100, 2, 1) end
-    eq(F.rereads(rows, 100), {})
+    eq(rereads(rows, 100), {})
 end)
 
 t.test("paging through to the end at a second a page does not finish a book", function()
     local rows = {}
     for p = 1, 120 do rows[#rows + 1] = row(p, 300, 1, 60) end
     for p = 121, 300 do rows[#rows + 1] = row(p, 300, 1, 1) end
-    near(F.progress(rows, 300), 120 / 300)
-    eq(F.status(F.progress(rows, 300), 0, 0), "reading")
+    near(progress(rows, 300), 120 / 300)
+    eq(F.status(progress(rows, 300), 0, 0), "reading")
 end)
 
 t.test("floating point does not spill a page into its neighbours", function()
@@ -202,7 +202,7 @@ t.test("floating point does not spill a page into its neighbours", function()
     eq(read, { [7] = true })
     local _s2, read2 = F.buckets({ row(27, 46, 0, 60) }, 46)
     eq(read2, { [27] = true })
-    near(F.progress({ row(1, 46, 0, 60), row(27, 46, 0, 60) }, 46), 1 / 46)
+    near(progress({ row(1, 46, 0, 60), row(27, 46, 0, 60) }, 46), 1 / 46)
 end)
 
 t.test("no page of any size spills into a neighbour", function()
@@ -224,7 +224,7 @@ t.test("one page of an older, smaller-font layout does not finish a book", funct
     local rows = {}
     for p = 1, 200 do rows[#rows + 1] = row(p, 450, 1, 60) end
     rows[#rows + 1] = row(100, 100, 2, 60)
-    near(F.progress(rows, 450), 200 / 450)
+    near(progress(rows, 450), 200 / 450)
 end)
 
 t.test("the ending read in an older layout still finishes the book", function()
@@ -232,7 +232,7 @@ t.test("the ending read in an older layout still finishes the book", function()
     for p = 1, 98 do rows[#rows + 1] = row(p, 100, 1, 120) end
     rows[#rows + 1] = row(99, 100, 2, 120)
     rows[#rows + 1] = row(100, 100, 2, 120)
-    near(F.progress(rows, 450), 1)
+    near(progress(rows, 450), 1)
 end)
 
 t.test("with no page count, the newest layout wins even within one day", function()
@@ -271,7 +271,7 @@ t.test("the slowest window is found where the time went", function()
         local s = (p >= 61 and p <= 70) and 300 or 60
         rows[p] = row(p, 200, 0, s)
     end
-    local s = F.slowest(rows, 200)
+    local s = slowest(rows, 200)
     eq(s.from, 61)
     eq(s.to, 70)
     near(s.secs, 3000)
@@ -280,13 +280,13 @@ end)
 t.test("the window is 2% of a long book", function()
     local rows = {}
     for p = 1, 1000 do rows[p] = row(p, 1000, 0, 60) end
-    local s = F.slowest(rows, 1000)
+    local s = slowest(rows, 1000)
     eq(s.to - s.from + 1, 20)
     eq(s.from, 1, "a flat book ties everywhere; the first wins")
 end)
 
 t.test("a book read less than one window uses what was read", function()
-    local s = F.slowest({ row(1, 300, 0, 60), row(2, 300, 0, 60), row(3, 300, 0, 60) }, 300)
+    local s = slowest({ row(1, 300, 0, 60), row(2, 300, 0, 60), row(3, 300, 0, 60) }, 300)
     eq(s.from, 1)
     eq(s.to, 3)
     near(s.secs, 180)
@@ -295,12 +295,12 @@ end)
 t.test("the window never reaches into unread pages", function()
     local rows = {}
     for p = 1, 50 do rows[p] = row(p, 100, 0, 60) end
-    local s = F.slowest(rows, 100)
+    local s = slowest(rows, 100)
     assert(s.to <= 50, "window ends at " .. s.to)
 end)
 
 t.test("nothing read, no slowest window", function()
-    eq(F.slowest({}, 100), nil)
+    eq(slowest({}, 100), nil)
 end)
 
 -- ── status ─────────────────────────────────────────────────────────────────
@@ -355,15 +355,14 @@ end
 
 t.test("progress: reading to the end finishes the book", function()
     local rows = readPages(1, 100, 100)
-    near(F.progress(rows, 100), 1)
-    eq(F.status(F.progress(rows, 100), 0, 0), "finished")
+    near(progress(rows, 100), 1)
+    eq(F.status(progress(rows, 100), 0, 0), "finished")
 end)
 
 t.test("progress: one look at the last page does not move it", function()
     local rows = readPages(1, 30, 100)
     rows[#rows + 1] = row(100, 100, 0, 15)
-    near(F.progress(rows, 100), 0.30)
-    near(F.reach(rows), 1, "the raw reach still sees the look")
+    near(progress(rows, 100), 0.30)
 end)
 
 t.test("progress: a few pages peeked at the back do not count either", function()
@@ -372,7 +371,7 @@ t.test("progress: a few pages peeked at the back do not count either", function(
     rows[#rows + 1] = row(480, 500, 0, 30)
     rows[#rows + 1] = row(482, 500, 0, 30)
     rows[#rows + 1] = row(490, 500, 0, 30)
-    near(F.progress(rows, 500), 40 / 500)
+    near(progress(rows, 500), 40 / 500)
 end)
 
 t.test("progress: skipping an appendix still finishes the book", function()
@@ -380,19 +379,28 @@ t.test("progress: skipping an appendix still finishes the book", function()
     -- but the ending was read.
     local rows = readPages(1, 80, 100)
     for _i, r in ipairs(readPages(96, 100, 100)) do rows[#rows + 1] = r end
-    near(F.progress(rows, 100), 1)
+    near(progress(rows, 100), 1)
 end)
 
 t.test("progress: a short start counts from the first page", function()
-    near(F.progress(readPages(1, 2, 100), 100), 0.02)
-    eq(F.progress({}, 100), 0)
+    near(progress(readPages(1, 2, 100), 100), 0.02)
+    eq(progress({}, 100), 0)
 end)
 
 t.test("progress: works across a re-pagination", function()
     -- First half at 200 pages, second half after a font change at 300.
     local rows = readPages(1, 100, 200)
     for _i, r in ipairs(readPages(151, 300, 300)) do rows[#rows + 1] = r end
-    near(F.progress(rows, 300), 1)
+    near(progress(rows, 300), 1)
+end)
+
+t.test("prepare keeps a missing last_open as nil, and sorts it last", function()
+    local d = data()
+    d.books[1].last_open = nil
+    local p = F.prepare(d)
+    eq(p.books[2].title, "Old")
+    eq(p.books[2].last_open, nil)
+    eq(F.status(p.books[2].progress, p.books[2].last_open, 60 * DAY), "reading")
 end)
 
 t.test("a book with no page count takes its most recent layout", function()
@@ -458,7 +466,7 @@ t.test("a stretch skimmed first and read properly later is not a re-read", funct
     for p = 70, 200 do rows[#rows + 1] = row(p, 200, 1, 60) end
     -- Day 5: goes back and reads 51..69 for the first time.
     for p = 51, 69 do rows[#rows + 1] = row(p, 200, 5, 60) end
-    eq(F.rereads(rows, 200), {})
+    eq(rereads(rows, 200), {})
 end)
 
 t.test("an out-of-range page is the same source as the page it clamps to", function()
@@ -469,14 +477,7 @@ t.test("an out-of-range page is the same source as the page it clamps to", funct
     for p = 1, 100 do rows[#rows + 1] = row(p, 300, 1, 60) end
     rows[#rows + 1] = row(60, 60, 2, 300)
     rows[#rows + 1] = row(61, 60, 3, 300)
-    near(F.progress(rows, 300), 100 / 300)
-end)
-
-t.test("analyze returns the same progress as progress()", function()
-    local rows = {}
-    for p = 1, 140 do rows[#rows + 1] = row(p, 300, 1 + p % 9, 60) end
-    rows[#rows + 1] = row(300, 300, 20, 30)
-    near(F.analyze(rows, 300).progress, F.progress(rows, 300))
+    near(progress(rows, 300), 100 / 300)
 end)
 
 -- A brute-force frontier, straight from the definition, to hold the

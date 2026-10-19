@@ -60,7 +60,27 @@ package.loaded["atlas/db"] = {
 local Source = dofile("micromodules/atlas/source.lua")
 package.loaded["atlas/source"] = Source
 
+-- The real fingerprint logic, with prepare() counted, to prove where it runs.
+local F = dofile("micromodules/atlas/fingerprint.lua")
+local real_prepare = F.prepare
+local prepare_calls = 0
+local in_render = false
+F.prepare = function(...)
+    prepare_calls = prepare_calls + 1
+    assert(not in_render, "prepare() must not run inside render")
+    return real_prepare(...)
+end
+package.loaded["atlas/fingerprint"] = F
+
 local FP = dofile("micromodules/atlas_fingerprint.lua")
+local raw_render = FP.render
+FP.render = function(c)
+    in_render = true
+    local ok, out = pcall(raw_render, c)
+    in_render = false
+    if not ok then error(out, 0) end
+    return out
+end
 
 local function runScheduled()
     local q = scheduled
@@ -226,6 +246,30 @@ t.test("the status follows the clock, not the time of the first render", functio
     end)
     os.time = real_time
     if not ok then error(err, 0) end
+end)
+
+t.test("the analysis runs in the deferred query, once, never in render", function()
+    db_answer = sample()
+    prepare_calls = 0
+    local c = ctx()
+    settle(c)
+    FP.render(c)
+    FP.render(ctx{ width = 200 })
+    eq(prepare_calls, 1)
+end)
+
+t.test("a book with no last_open is never called paused", function()
+    db_answer = sample()
+    db_answer.books[2].last_open = nil
+    local card = settle(ctx())
+    local found
+    for i = 1, 2 do
+        local parts = bookParts(card, i)
+        if parts.line[1].text == "Ficciones" then found = parts.note.text end
+    end
+    assert(found, "Ficciones is on the card")
+    assert(not found:find("paused", 1, true), found)
+    assert(found:find("· reading$"), found)
 end)
 
 t.test("as many books as the height allows, at least one", function()

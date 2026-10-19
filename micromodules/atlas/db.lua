@@ -1,6 +1,7 @@
--- The one query Reading Atlas makes. Read-only, always.
+-- Every query Reading Atlas makes against KOReader's statistics.sqlite3.
+-- Read-only, always, through withConnection below.
 --
--- Grouping by UTC hour bounds the result at hours-with-reading (a few
+-- hourRows (phase 1): grouping by UTC hour bounds the result at hours-with-reading (a few
 -- thousand over years) instead of one row per page read, and serves both the
 -- day heatmap and the hour x weekday clock from a single scan. Converting to
 -- local time is Lua's job, in aggregate.lua, where it can be tested.

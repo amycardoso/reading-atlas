@@ -20,7 +20,7 @@
 -- a map from languages to authors can never be answered from the wrong cache.
 local M = {}
 
-local _state = {}   -- key -> { cache = nil|false|table, at = time settled, querying = bool, pending = {} }
+local _state = {}   -- key -> { cache = nil|false|table, due = time to refresh, querying = bool, pending = {} }
 
 local function stateFor(key)
     local s = _state[key]
@@ -57,7 +57,21 @@ end
 --                  back to "Reading…" -- while a fresh query runs off the
 --                  paint thread; its refresh callbacks fire when it lands.
 --                  Without it, a key is queried once per KOReader session.
+-- deps.retry    -> seconds before trying again after a failed refresh;
+--                  defaults to min(max_age, 300). A busy database (the
+--                  statistics plugin flushing) should cost minutes, not
+--                  another whole max_age of stale data.
 -- deps.now      -> the clock for max_age; defaults to os.time.
+local function addPending(s, refresh)
+    if not refresh then return end
+    -- The host renders a card several times while fitting it; one refresh
+    -- per caller is enough, or e-ink repaints the card N times.
+    for i = 1, #s.pending do
+        if s.pending[i] == refresh then return end
+    end
+    s.pending[#s.pending + 1] = refresh
+end
+
 local function startQuery(s, deps, revalidating)
     s.querying = true
     local schedule = deps.schedule or defaultSchedule
@@ -67,14 +81,18 @@ local function startQuery(s, deps, revalidating)
         local ok, result = pcall(deps.query)
         if ok and accept(result) then
             s.cache = result
-        elseif not revalidating then
+            s.due = deps.max_age and clock() + deps.max_age
+        elseif revalidating then
+            -- A failed REfresh keeps the last good result: one bad read is no
+            -- reason to blank a card that was showing data. Try again soon.
+            local retry = deps.retry or math.min(deps.max_age, 300)
+            s.due = clock() + retry
+        else
             -- Never leave the cache at nil here, or the module would
-            -- re-query on every single render. A failed REfresh keeps the
-            -- last good result instead: one bad read is no reason to blank
-            -- a card that was showing data.
+            -- re-query on every single render.
             s.cache = false
+            s.due = deps.max_age and clock() + deps.max_age
         end
-        s.at = clock()
         s.querying = false
         local callbacks = s.pending
         s.pending = {}
@@ -86,9 +104,8 @@ function M.getKeyed(key, refresh, deps)
     local s = stateFor(key)
     if s.cache ~= nil then
         local clock = deps.now or os.time
-        local stale = deps.max_age and s.at and clock() - s.at >= deps.max_age
-        if stale then
-            if refresh then s.pending[#s.pending + 1] = refresh end
+        if deps.max_age and s.due and clock() >= s.due then
+            addPending(s, refresh)
             if not s.querying then startQuery(s, deps, true) end
         end
         return s.cache
@@ -98,7 +115,7 @@ function M.getKeyed(key, refresh, deps)
     -- start menu can both render the same module in one frame). Collecting
     -- into pending here, before the querying guard below, is what makes
     -- that true.
-    if refresh then s.pending[#s.pending + 1] = refresh end
+    addPending(s, refresh)
     if s.querying then return nil end
     startQuery(s, deps, false)
     return nil

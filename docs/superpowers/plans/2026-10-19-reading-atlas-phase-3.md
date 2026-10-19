@@ -17,18 +17,16 @@ I/O, widget e composição, e por último o KOReader de verdade.
   `total_pages` é ignorada; página além do layout é presa à última.
 - `density(rows, n, pages)`: segundos por página **na contagem atual** — o
   tempo do balde dividido pela largura dele em páginas (`pages / n`).
-- `reach(rows)`: a posição mais adiante que alguma linha tocou, 0..1. Crua:
-  uma olhada na última página conta. Só serve para limitar a busca da janela
-  mais lenta.
-- `progress(rows, pages)`: até onde o leitor chegou de fato — a página mais
+- `analyze(rows, pages)`: a única entrada que `prepare` usa. Uma passada,
+  uma contagem, devolvendo progresso, releituras e trecho mais lento.
+- Progresso: até onde o leitor chegou de fato — a página mais
   adiante que foi **lida** (5 s/página ou mais, não folheada) e que fecha uma
   janela de max(5, 2% do livro) com pelo menos metade das páginas lidas,
   vindas de pelo menos **duas** páginas distintas do livro no layout em que
   foram lidas. Uma olhada no sumário, folhear até o fim, ou uma página de um
   layout antigo de fonte menor (que cobre várias páginas atuais) não contam;
   pular um apêndice e ler o final conta.
-- `analyze(rows, pages)`: uma passada, por dia local, em ordem, que devolve
-  o progresso e as releituras (`rereads(rows, pages)` é atalho). Uma página é
+- Releituras: por dia local, em ordem. Uma página é
   relida no dia `d` se já tinha sido **lida** (não folheada) num dia anterior,
   se é lida de novo em `d`, e se antes de `d` o leitor tinha chegado **de
   fato** (a fronteira, não o alcance cru) a `REREAD_LEAD` (5%) além dela.
@@ -36,14 +34,15 @@ I/O, widget e composição, e por último o KOReader de verdade.
   incremental.
 - `toBuckets(iv, pages, n)`: intervalo de páginas → baldes da faixa, para a
   barra de releitura.
-- `slowest(rows, pages)`: janela de `max(10, ceil(2% de pages))` páginas com
-  mais tempo, só sobre o que foi lido. Empate fica com a primeira.
+- Trecho mais lento: janela de `max(10, ceil(2% de pages))` páginas com mais
+  tempo, até a página mais adiante tocada, a partir da mesma contagem.
+  Empate fica com a primeira.
 - `status(progress, last_open, now)`: terminado a 97% de `progress`; senão
   "paused" depois de 30 dias sem abrir, "reading" antes. Chamado no render.
-- `prepare(data)`: agrupa linhas por livro, ordena por `last_open`, corta
-  em `MAX_BOOKS` (6), e calcula uma vez o que não depende da largura nem do
-  relógio: progresso, releituras e trecho mais lento. Livro sem `pages` usa o
-  layout com o `last_seen` mais recente.
+- `prepare(data)`: roda dentro da consulta adiada, fora da pintura. Agrupa
+  linhas por livro, ordena por `last_open`, corta em `MAX_BOOKS` (6), e chama
+  `analyze` uma vez por livro. Livro sem `pages` usa o layout com o
+  `last_seen` mais recente; livro sem `last_open` fica com `nil`.
 - `layout(prep, n, Scale, count)`: só para os `count` livros que o card mostra.
   Degrau por balde com **um** conjunto de quartis para esses livros; folhear
   (< 5 s/página) é o degrau 0; não lido é `nil`. Converte as releituras de
@@ -80,9 +79,9 @@ Teste: `tests/_test_stripwidget.lua`, incluindo a herança de `Widget`.
 ### 4. `micromodules/atlas_fingerprint.lua`
 
 Composição: estados (Reading…, No statistics, Not enough reading yet), e por
-livro título + meta, faixa e nota, e a legenda. A consulta tem `max_age` de
-uma hora. `prepare` é memoizado por resultado de consulta, o status é
-calculado no render, e `layout` é memoizado por largura e número de livros, porque o host renderiza o mesmo card várias vezes ao
+livro título + meta, faixa e nota, e a legenda. A consulta lê o banco e roda
+`prepare`, com `max_age` de uma hora. O status é calculado no render, e
+`layout` é memoizado por resultado, largura e número de livros, porque o host renderiza o mesmo card várias vezes ao
 ajustar a escala. "paused since" usa nomes de mês via gettext e inclui o ano
 quando não é o ano corrente. Quantos livros cabem sai de
 `ctx.height` dividido pela altura fixa de um livro, entre 1 e 6. O preview do
@@ -153,7 +152,26 @@ Uma segunda rodada da revisão achou mais sete:
 7. A abertura e o fechamento da conexão estavam duplicados em `db.lua`;
    agora `withConnection` serve às duas consultas.
 
+A terceira rodada achou mais nove:
+
+1. Um livro sem `last_open` virava "paused since 1970". Agora fica `nil`, e
+   `status` nunca chama de pausado um livro sem data.
+2. `prepare` (a análise pesada) rodava no render, na thread de pintura, e de
+   novo a cada renovação horária. Agora roda dentro da consulta adiada; um
+   teste falha se `prepare` for chamado dentro de `render`.
+3. Uma renovação que falhava (banco ocupado) adiava a próxima tentativa por
+   mais uma hora inteira. Agora tenta de novo em 5 minutos (`deps.retry`).
+4. Cada render no caminho "velho" empilhava o mesmo callback de refresh, e o
+   card era redesenhado N vezes. Agora cada callback entra uma vez.
+5. O trecho mais lento refazia a contagem por página que `analyze` já tinha.
+6. `analyze` espalhava cada linha duas vezes; agora uma.
+7. `progress`, `rereads`, `slowest` e `reach` eram entradas públicas que a
+   produção não usava. Saíram: os testes passam por `analyze`, o que o card
+   usa.
+8. Uma condição sempre verdadeira (`first_day[p] < d`) foi removida.
+9. Dois comentários desatualizados (`install.sh`, `db.lua`).
+
 ## Resultado
 
-14 suítes, 213 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 215 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

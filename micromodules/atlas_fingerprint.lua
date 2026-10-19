@@ -14,30 +14,26 @@ local HEADING = _("Atlas fingerprint")
 -- so a book read every day would drift to "paused", with weeks-old progress.
 local MAX_AGE = 3600
 
+-- The query reads the database AND analyzes every book, so the heavy part runs
+-- in the deferred callback, never on the paint path (source.lua, rule 1).
 local function fetch(refresh)
     return atlas("source").getKeyed("fingerprint", refresh, {
-        query = function() return atlas("db").fingerprintRows(atlas("fingerprint").MAX_BOOKS) end,
+        query = function()
+            local F = atlas("fingerprint")
+            local data = atlas("db").fingerprintRows(F.MAX_BOOKS)
+            if data == nil then return nil end
+            return F.prepare(data)
+        end,
         -- No books is data (read a little more), not "no database" (nil).
         accept = function(result) return result ~= nil end,
         max_age = MAX_AGE,
     })
 end
 
--- prepare() once per query result; layout() once per strip width and book
--- count. The host renders the same card at several scales while fitting it,
--- and both walk every row of every book. Neither reads the clock: the status
--- does, so it is asked for at render time.
-local _prep_memo = setmetatable({}, { __mode = "k" })
+-- layout() once per prepared result, strip width and book count: the host
+-- renders the same card at several scales while fitting it. Nothing here reads
+-- the clock; the status does, so it is asked for at render time.
 local _layout_memo = setmetatable({}, { __mode = "k" })
-
-local function prepared(data)
-    local hit = _prep_memo[data]
-    if not hit then
-        hit = atlas("fingerprint").prepare(data)
-        _prep_memo[data] = hit
-    end
-    return hit
-end
 
 local function laidOut(prep, n, count)
     local memo = _layout_memo[prep]
@@ -106,24 +102,23 @@ local function render(ctx)
 
     -- The Add picker previews every module cold; it must never be what starts
     -- the query. peek() answers from the cache and schedules nothing.
-    local data
+    local prep
     if ctx.preview then
-        data = atlas("source").peek("fingerprint")
+        prep = atlas("source").peek("fingerprint")
     else
-        data = fetch(refresh)
+        prep = fetch(refresh)
     end
-    if data == nil then
+    if prep == nil then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
             heading = HEADING, value = _("Reading…") }
     end
-    if data == false then
+    if prep == false then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
             heading = HEADING, value = _("No statistics"),
             sub = _("KOReader's statistics plugin has no data yet.") }
     end
 
     local now = os.time()
-    local prep = prepared(data)
     if #prep.books == 0 then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
             heading = HEADING, value = _("Not enough reading yet"),
