@@ -316,12 +316,13 @@ t.test("not finished: reading within 30 days, paused after", function()
 end)
 
 -- ── prepare ────────────────────────────────────────────────────────────────
+-- In the order db.fingerprintRows returns books: last_open DESC.
 local function data()
     return {
         books = {
-            { id = 1, title = "Old", pages = 100, last_open = 10 * DAY },
-            { id = 2, title = "New", pages = 0, last_open = 50 * DAY },
-            { id = 3, title = "No rows", pages = 100, last_open = 60 * DAY },
+            { id = 2, title = "New", pages = 0, last_open = 50 * DAY, sig = "n1" },
+            { id = 1, title = "Old", pages = 100, last_open = 10 * DAY, sig = "o1" },
+            { id = 3, title = "No rows", pages = 100, last_open = 5 * DAY, sig = "x1" },
         },
         rows = {
             row(1, 100, 1, 60, 1), row(100, 100, 2, 60, 1),
@@ -330,7 +331,7 @@ local function data()
     }
 end
 
-t.test("prepare orders by last open, newest first, and drops books without rows", function()
+t.test("prepare keeps the database's order and drops books without rows", function()
     local p = F.prepare(data())
     eq(#p.books, 2)
     eq(p.books[1].title, "New")
@@ -394,9 +395,9 @@ t.test("progress: works across a re-pagination", function()
     near(progress(rows, 300), 1)
 end)
 
-t.test("prepare keeps a missing last_open as nil, and sorts it last", function()
+t.test("prepare keeps a missing last_open as nil", function()
     local d = data()
-    d.books[1].last_open = nil
+    d.books[2].last_open = nil
     local p = F.prepare(d)
     eq(p.books[2].title, "Old")
     eq(p.books[2].last_open, nil)
@@ -408,15 +409,43 @@ t.test("a book with no page count takes its most recent layout", function()
     eq(p.books[1].pages, 200)
 end)
 
-t.test("prepare keeps at most MAX_BOOKS", function()
+t.test("prepare does not re-sort or re-cap: the query owns both", function()
     local d = { books = {}, rows = {} }
-    for i = 1, 9 do
+    for i = 1, 8 do
         d.books[i] = { id = i, title = "B" .. i, pages = 10, last_open = i }
         d.rows[i] = row(1, 10, 0, 60, i)
     end
     local p = F.prepare(d)
-    eq(#p.books, F.MAX_BOOKS)
-    eq(p.books[1].title, "B9")
+    eq(#p.books, 8)
+    eq(p.books[1].title, "B1")
+end)
+
+-- ── reuse across refreshes ─────────────────────────────────────────────────
+t.test("an unchanged book without rows reuses its earlier analysis", function()
+    local first = F.prepare(data())
+    local again = { books = data().books, rows = {} } -- nobody read since
+    local p = F.prepare(again, first)
+    assert(rawequal(p, first), "nothing changed: the old answer itself comes back")
+end)
+
+t.test("a changed book is analyzed again, the rest reused", function()
+    local first = F.prepare(data())
+    local d = data()
+    d.books[1].sig = "n2" -- "New" was read
+    d.rows = { row(10, 80, 3, 120, 2), row(20, 200, 4, 30, 2), row(21, 200, 5, 60, 2) }
+    local p = F.prepare(d, first)
+    assert(not rawequal(p, first))
+    assert(not rawequal(p.books[1], first.books[1]), "New analyzed again")
+    assert(rawequal(p.books[2], first.books[2]), "Old reused as is")
+    eq(p.books[1].secs, 210)
+end)
+
+t.test("a book without a sig is never taken for unchanged", function()
+    local d = data()
+    for _i, b in ipairs(d.books) do b.sig = nil end
+    local first = F.prepare(d)
+    local again = { books = d.books, rows = {} }
+    eq(#F.prepare(again, first).books, 0, "no rows and no sig: nothing to show")
 end)
 
 -- ── layout ─────────────────────────────────────────────────────────────────
@@ -593,6 +622,32 @@ t.test("a look-up near the end every day does not rescan the book", function()
     F.analyze(rows, 1500)
     local spent = os.clock() - t0
     assert(spent < 0.5, ("took %.3f s"):format(spent))
+end)
+
+-- ── review findings, round 5 ───────────────────────────────────────────────
+t.test("the strip calls 'read' what progress calls read, by the book's threshold", function()
+    -- Read 1..70 at 80 s a page (median 80, threshold 20 s), then paged to
+    -- the end at 10 s: above SKIM_SECS, below this reader's threshold.
+    local d = { books = { { id = 1, title = "B", pages = 100, last_open = 0 } }, rows = {} }
+    for p = 1, 70 do d.rows[#d.rows + 1] = row(p, 100, 1, 80) end
+    for p = 71, 100 do d.rows[#d.rows + 1] = row(p, 100, 1, 10) end
+    local s = F.layout(F.prepare(d), 100, Scale)[1]
+    near(s.book.threshold, 20)
+    near(s.book.progress, 0.70)
+    for k = 71, 100 do eq(s.levels[k], 0, "bucket " .. k .. " is only touched") end
+    assert(s.levels[20] >= 1)
+end)
+
+t.test("a page read over two short sessions counts as read, and its re-read shows", function()
+    -- Threshold 15 s (median 60). Page 40 gets 10 s on day 1 and 10 s on
+    -- day 2: read in total. The reader moves on, then re-reads 40..45 on day 30.
+    local rows = {}
+    for p = 1, 39 do rows[#rows + 1] = row(p, 100, 1, 60) end
+    rows[#rows + 1] = row(40, 100, 1, 10)
+    rows[#rows + 1] = row(40, 100, 2, 10)
+    for p = 41, 80 do rows[#rows + 1] = row(p, 100, 2, 60) end
+    for p = 40, 45 do rows[#rows + 1] = row(p, 100, 30, 60) end
+    eq(rereads(rows, 100), { { from = 40, to = 45 } })
 end)
 
 t.test("a long book read over many days analyzes quickly", function()

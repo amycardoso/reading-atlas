@@ -57,15 +57,18 @@ end
 --                  back to "Reading…" -- while a fresh query runs off the
 --                  paint thread; its refresh callbacks fire when it lands.
 --                  Without it, a key is queried once per KOReader session.
--- deps.retry    -> seconds before trying again after a failed refresh;
+-- deps.retry    -> with max_age: seconds before trying again after a failure,
+--                  doubling with each failure in a row up to max_age;
 --                  defaults to min(max_age, 300). A busy database (the
---                  statistics plugin flushing) should cost minutes, not
---                  another whole max_age of stale data.
+--                  statistics plugin flushing) should cost minutes, whether
+--                  it hits the first query or a refresh; a database that is
+--                  really not there backs off to max_age.
 -- deps.now      -> the clock for max_age; defaults to os.time.
 --
--- A refresh whose query returns the very object already cached changed
--- nothing: the callbacks do not fire, so e-ink is not repainted with the same
--- card. A query that can tell its answer is unchanged returns the old object.
+-- Callbacks fire only when what the card shows changed: a refresh whose
+-- query returns the very object already cached, or a failure that leaves the
+-- cache as it was, repaints nothing on e-ink. A query that can tell its
+-- answer is unchanged returns the old object.
 local function addPending(s, refresh)
     if not refresh then return end
     -- The host renders a card several times while fitting it; one refresh
@@ -83,26 +86,24 @@ local function startQuery(s, deps, revalidating)
     local clock = deps.now or os.time
     schedule(function()
         local ok, result = pcall(deps.query)
-        local unchanged = false
+        local before = s.cache
         if ok and accept(result) then
-            unchanged = revalidating and rawequal(result, s.cache)
             s.cache = result
+            s.failures = 0
             s.due = deps.max_age and clock() + deps.max_age
-        elseif revalidating and s.cache then
-            -- A failed REfresh keeps the last good result: one bad read is no
-            -- reason to blank a card that was showing data. Try again soon.
-            local retry = deps.retry or math.min(deps.max_age, 300)
-            s.due = clock() + retry
-        elseif revalidating then
-            -- Still nothing usable (no database yet): ask again in max_age,
-            -- not every few minutes.
-            s.due = clock() + deps.max_age
         else
-            -- Never leave the cache at nil here, or the module would
+            -- A failed refresh keeps the last good result: one bad read is no
+            -- reason to blank a card that was showing data. A failed first
+            -- query settles at false -- never nil, or the module would
             -- re-query on every single render.
-            s.cache = false
-            s.due = deps.max_age and clock() + deps.max_age
+            if s.cache == nil then s.cache = false end
+            s.failures = (s.failures or 0) + 1
+            if deps.max_age then
+                local retry = deps.retry or math.min(deps.max_age, 300)
+                s.due = clock() + math.min(deps.max_age, retry * 2 ^ (s.failures - 1))
+            end
         end
+        local unchanged = rawequal(before, s.cache)
         s.querying = false
         local callbacks = s.pending
         s.pending = {}

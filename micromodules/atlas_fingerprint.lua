@@ -20,16 +20,17 @@ local function fetch(refresh)
     return atlas("source").getKeyed("fingerprint", refresh, {
         query = function()
             local F = atlas("fingerprint")
-            local data = atlas("db").fingerprintRows(F.MAX_BOOKS)
-            if data == nil then return nil end
-            -- Nothing read since the last query: hand back the same analysis,
-            -- which also tells source.lua not to repaint the card.
-            local sig = F.signature(data)
+            -- The previous answer's sigs let the database skip the page rows
+            -- of every book nobody read since, and prepare() reuse their
+            -- analysis; with nothing new at all, the old answer comes back
+            -- as is, and source.lua does not repaint the card.
             local old = atlas("source").peek("fingerprint")
-            if type(old) == "table" and old.sig == sig then return old end
-            local prep = F.prepare(data)
-            prep.sig = sig
-            return prep
+            if type(old) ~= "table" then old = nil end
+            local known = {}
+            for _i, b in ipairs(old and old.books or {}) do known[b.id] = b.sig end
+            local data = atlas("db").fingerprintRows(F.MAX_BOOKS, known)
+            if data == nil then return nil end
+            return F.prepare(data, old)
         end,
         -- No books is data (read a little more), not "no database" (nil).
         accept = function(result) return result ~= nil end,
@@ -85,18 +86,24 @@ local function meta(b, now)
     return hours(b.secs) .. " · " .. string.format(_("%d%%"), math.floor(b.progress * 100))
 end
 
+-- "p. 12" or "p. 12–15": never "p. 12–12".
+local function pageRange(from, to)
+    if from == to then return string.format(_("p. %d"), from) end
+    return string.format(_("p. %d–%d"), from, to)
+end
+
 -- The line under the strip.
 local function note(strip, now)
     local b = strip.book
     local parts = {}
     local s = strip.slowest
     if s then
-        parts[#parts + 1] = string.format(_("lingered on p. %d–%d (%d min)"),
-            s.from, s.to, math.floor(s.secs / 60 + 0.5))
+        parts[#parts + 1] = string.format(_("lingered on %s (%d min)"),
+            pageRange(s.from, s.to), math.floor(s.secs / 60 + 0.5))
     end
     local rr = strip.reread_pages
     if rr then
-        parts[#parts + 1] = string.format(_("re-read p. %d–%d"), rr.from, rr.to)
+        parts[#parts + 1] = string.format(_("re-read %s"), pageRange(rr.from, rr.to))
     end
     local status = statusOf(b, now)
     if status == "reading" then

@@ -305,13 +305,16 @@ function M.analyze(rows, pages)
         local today = {}
         for _j, r in ipairs(by_day[d]) do tallyRow(st, r, today) end
         -- Days run in order and first_day is only set below, so a page with a
-        -- first_day was first read on an earlier day.
+        -- first_day was first read on an earlier day. A page's first day is
+        -- the day it became read in total -- two short sessions on one page
+        -- add up -- and a re-read is a day that reads it again in full.
         for p, s in pairs(today) do
-            if s >= thr then
-                if first_day[p] and far_before >= p / pages + M.REREAD_LEAD then
+            if first_day[p] then
+                if s >= thr and far_before >= p / pages + M.REREAD_LEAD then
                     marked[p] = true
                 end
-                if not first_day[p] then first_day[p] = d end
+            elseif st.isread[p] then
+                first_day[p] = d
             end
         end
         far_before = frontier(st, today)
@@ -335,7 +338,7 @@ function M.analyze(rows, pages)
         end
         k = k + 1
     end
-    return { progress = far_before, rereads = out, slowest = slowest(st) }
+    return { progress = far_before, rereads = out, slowest = slowest(st), threshold = thr }
 end
 
 -- The largest interval, or nil. Ties go to the first.
@@ -363,28 +366,16 @@ function M.status(progress, last_open, now)
     return "reading"
 end
 
--- A cheap fingerprint of a query result: when it matches the last one, the
--- reader has not read since, and the previous analysis still stands.
-function M.signature(data)
-    local parts = {}
-    for _i, b in ipairs(data.books or {}) do
-        parts[#parts + 1] = string.format("%s:%s:%s", tostring(b.id),
-            tostring(b.last_open), tostring(b.pages))
-    end
-    local secs, seen = 0, 0
-    for _i, r in ipairs(data.rows or {}) do
-        secs = secs + (r.secs or 0)
-        if (r.last_seen or 0) > seen then seen = r.last_seen end
-    end
-    parts[#parts + 1] = string.format("%d:%.0f:%.0f", #(data.rows or {}), secs, seen)
-    return table.concat(parts, "|")
-end
-
--- Books with their rows, most recently opened first, at most MAX_BOOKS, each
--- with analyze()'s results. Runs inside the query, off the paint path: this is
--- the heavy part. The status reads the clock, so the card asks status() at
+-- Books with their analysis, in the order db.fingerprintRows gives them (it
+-- owns the order and the cap). Runs inside the query, off the paint path: this
+-- is the heavy part. The status reads the clock, so the card asks status() at
 -- render time.
-function M.prepare(data)
+--
+-- `old` is the previous answer, if any. A book whose sig is unchanged was not
+-- read since and came without rows; its earlier entry is reused as it is. When
+-- every book is reused, in the same order, `old` itself comes back, which tells
+-- source.lua that nothing changed and the card need not be repainted.
+function M.prepare(data, old)
     local by_book = {}
     for i = 1, #(data.rows or {}) do
         local r = data.rows[i]
@@ -392,10 +383,16 @@ function M.prepare(data)
         if not list then list = {}; by_book[r.id_book] = list end
         list[#list + 1] = r
     end
-    local books = {}
+    local before = {}
+    for _i, b in ipairs(old and old.books or {}) do before[b.id] = b end
+    local books, same = {}, old ~= nil
     for _i, b in ipairs(data.books or {}) do
         local rows = by_book[b.id]
-        if rows and #rows > 0 then
+        local prev = before[b.id]
+        if not rows and prev and b.sig ~= nil and prev.sig == b.sig then
+            books[#books + 1] = prev
+        elseif rows and #rows > 0 then
+            same = false
             local secs = 0
             for j = 1, #rows do secs = secs + (rows[j].secs or 0) end
             local pages = currentPages(b, rows)
@@ -405,17 +402,18 @@ function M.prepare(data)
                 -- as "paused since 1970".
                 id = b.id, title = b.title or "", last_open = b.last_open,
                 pages = pages, rows = rows, secs = secs, progress = an.progress,
+                threshold = an.threshold,
                 rereads = an.rereads, reread_pages = M.largest(an.rereads),
-                slowest = an.slowest,
+                slowest = an.slowest, sig = b.sig,
             }
         end
     end
-    table.sort(books, function(x, y)
-        local xo, yo = x.last_open or 0, y.last_open or 0
-        if xo ~= yo then return xo > yo end
-        return x.id < y.id
-    end)
-    while #books > M.MAX_BOOKS do table.remove(books) end
+    if same and #books == #old.books then
+        for i = 1, #books do
+            if books[i] ~= old.books[i] then same = false; break end
+        end
+        if same then return old end
+    end
     return { books = books }
 end
 
@@ -431,18 +429,22 @@ function M.layout(prep, n, Scale, count)
         local b = prep.books[i]
         local dens = M.density(b.rows, n, b.pages)
         strips[i] = { book = b, density = dens }
+        local thr = b.threshold or M.SKIM_SECS
         for k = 1, n do
             local v = dens[k]
-            if v and v >= M.SKIM_SECS then values[#values + 1] = v end
+            if v and v >= thr then values[#values + 1] = v end
         end
     end
     local th = Scale.thresholds(values)
     for _i, s in ipairs(strips) do
+        -- Step 0 is "touched, not read", by the same threshold as progress:
+        -- the strip must not ink as read what the percentage says was not.
+        local thr = s.book.threshold or M.SKIM_SECS
         local levels = {}
         for k = 1, n do
             local v = s.density[k]
             if v ~= nil then
-                levels[k] = (v < M.SKIM_SECS) and 0 or Scale.level(v, th)
+                levels[k] = (v < thr) and 0 or Scale.level(v, th)
             end
         end
         s.levels = levels

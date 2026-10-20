@@ -23,9 +23,11 @@ local Grid = nil  -- injected below by the spec files' loader, or dofile'd
 
 local M = {}
 
--- Luminance per step, light to dark: the greys shared with the fingerprint's
--- strips, in ink.lua next to this file.
-M.INK = dofile((debug.getinfo(1, "S").source:match("^@(.+/)") or "./") .. "ink.lua")
+-- Luminance per step, light to dark: atlas/ink.lua, through the loader, so
+-- the grid and the fingerprint's strips share one table (package.loaded
+-- "atlas/ink") and a retune changes every card together.
+local HERE = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
+M.INK = dofile(HERE .. "loader.lua").make(HERE .. "../")("ink")
 
 -- `grid_mod` lets callers hand in the already-loaded Grid helper. Falls back
 -- to a sibling dofile so this file also works standalone in tests.

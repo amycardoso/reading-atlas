@@ -47,8 +47,8 @@ end)
 
 t.test("paints with the same greys as the grid", function()
     local GW = dofile("micromodules/atlas/gridwidget.lua")
-    eq(SW.INK, GW.INK)
     eq(SW.INK, dofile("micromodules/atlas/ink.lua"))
+    assert(rawequal(SW.INK, GW.INK), "one shared table, not two copies")
 end)
 
 t.test("getSize is the width by strip + gap + bar", function()

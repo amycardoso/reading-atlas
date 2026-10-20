@@ -40,9 +40,10 @@ I/O, widget e composição, e por último o KOReader de verdade.
   Empate fica com a primeira.
 - `status(progress, last_open, now)`: terminado a 97% de `progress`; senão
   "paused" depois de 30 dias sem abrir, "reading" antes. Chamado no render.
-- `prepare(data)`: roda dentro da consulta adiada, fora da pintura. Agrupa
-  linhas por livro, ordena por `last_open`, corta em `MAX_BOOKS` (6), e chama
-  `analyze` uma vez por livro. Livro sem `pages` usa o layout com o
+- `prepare(data, old)`: roda dentro da consulta adiada, fora da pintura.
+  Mantém a ordem e o corte que o SQL deu, chama `analyze` só para livros cujo
+  carimbo mudou, reusa a análise dos outros e devolve `old` quando nada
+  mudou. Livro sem `pages` usa o layout com o
   `last_seen` mais recente; livro sem `last_open` fica com `nil`.
 - `layout(prep, n, Scale, count)`: só para os `count` livros que o card mostra.
   Degrau por balde com **um** conjunto de quartis para esses livros; folhear
@@ -57,8 +58,11 @@ Teste: `tests/_test_fingerprint.lua`.
 
 ### 2. `atlas/db.lua` — `fingerprintRows(limit)`
 
-Duas consultas na mesma conexão `ro`: os livros com `total_read_time >= 600`
-por `last_open DESC LIMIT n`, e as linhas desses livros agregadas por
+Três consultas na mesma conexão `ro`: os livros com `total_read_time >= 600`
+e linhas em `page_stat_data`, por `last_open DESC, id LIMIT n`; um carimbo
+por livro (contagem, soma, último início), que com título, páginas e
+`last_open` forma a `sig`; e, só para livros cuja `sig` não está em `known`,
+as linhas agregadas por
 `(id_book, page, total_pages, dia local)`, com `MAX(start_time)` como
 `last_seen`. O dia local é
 `CAST(strftime('%s', start_time, 'unixepoch', 'localtime') AS INTEGER) / 86400`:
@@ -206,7 +210,31 @@ A quarta rodada achou mais nove; oito corrigidos:
 9. Os cinco cinzas estavam copiados em `stripwidget.lua`; agora vêm de
    `atlas/ink.lua`, compartilhado com `gridwidget.lua`.
 
+A quinta rodada achou mais nove, todos corrigidos:
+
+1. Uma primeira consulta que falhava (banco ocupado ao abrir o menu)
+   mostrava "No statistics" por uma hora. Agora falhas recuam de forma
+   exponencial: 5, 10, 20, 40 minutos, até `max_age`.
+2. Uma renovação que falhava mantinha o card mas o repintava. Agora só há
+   repintura quando o que o card mostra mudou.
+3. A assinatura não incluía o título, e um título corrigido não aparecia.
+4. A faixa usava 5 s fixos para "folheado", e o progresso o limiar do livro:
+   a faixa podia pintar como lido o que a porcentagem dizia que não. Agora os
+   dois usam o limiar do livro.
+5. A renovação horária refazia o GROUP BY inteiro só para calcular a
+   assinatura. Agora uma consulta barata devolve um carimbo por livro (linhas,
+   tempo, último início); só os livros cujo carimbo mudou têm as páginas lidas
+   e analisadas de novo, e os outros reusam a análise anterior.
+6. Uma página lida em duas sessões curtas nunca ganhava "primeiro dia", e uma
+   releitura dela não aparecia. Agora o primeiro dia é quando ela passa a
+   contar como lida no total.
+7. "p. 12–12" agora sai "p. 12".
+8. `prepare` reordenava e cortava o que o SQL já ordenava e cortava. Agora o
+   SQL é o único dono (`ORDER BY last_open DESC, id`).
+9. `ink.lua` era carregado duas vezes, em duas tabelas. Agora passa pelo
+   loader e é uma tabela só.
+
 ## Resultado
 
-14 suítes, 225 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 237 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

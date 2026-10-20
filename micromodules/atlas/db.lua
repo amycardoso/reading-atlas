@@ -64,15 +64,28 @@ end
 
 -- ── The fingerprint ─────────────────────────────────────────────────────────
 -- Books with more than ten minutes of reading, most recently opened first.
+-- This query owns the order and the cap; prepare() keeps them as they come.
 -- Only books that still have page rows: one whose stats were reset would take
 -- a slot of the LIMIT and then be dropped, leaving the card a book short.
+-- EXISTS is cheap: page_stat_data's UNIQUE (id_book, page, start_time) gives
+-- it an index that starts with id_book.
 local FP_BOOKS = [[
     SELECT id, title, pages, last_open
     FROM book
     WHERE total_read_time >= 600
       AND EXISTS (SELECT 1 FROM page_stat_data WHERE id_book = book.id)
-    ORDER BY last_open DESC
+    ORDER BY last_open DESC, id
     LIMIT %d;
+]]
+
+-- A cheap stamp per book: how many page rows, how much time, the latest start.
+-- If none of it moved, nobody read the book since, and the page rows below --
+-- the expensive part -- need not be read or analyzed again.
+local FP_STAMPS = [[
+    SELECT id_book, COUNT(*), SUM(duration), MAX(start_time)
+    FROM page_stat_data
+    WHERE id_book IN (%s)
+    GROUP BY id_book;
 ]]
 
 -- Their pages, summed per page, layout and day. A day is all the re-read rule
@@ -97,42 +110,68 @@ local function column(result, i, n)
     return col and col[n]
 end
 
--- Returns { books = { { id, title, pages, last_open } }, rows = { { id_book,
--- page, total_pages, day, secs, last_seen } } }, or nil when there is no
--- readable statistics database. Never writes.
+local function count(result)
+    return result and result[1] and #result[1] or 0
+end
+
+-- Returns
+--   { books = { { id, title, pages, last_open, sig } },
+--     rows  = { { id_book, page, total_pages, day, secs, last_seen } } }
+-- or nil when there is no readable statistics database. Never writes.
+--
+-- `known` maps a book id to the sig of an earlier answer; a book whose sig
+-- still matches gets no rows -- its earlier analysis stands. sig covers
+-- everything prepare() shows from the book table and from its page rows.
 --
 -- book.title is the first TEXT column Reading Atlas reads from this database;
 -- like every value, it is converted before withConnection closes.
-function M.fingerprintRows(limit)
+function M.fingerprintRows(limit, known)
+    known = known or {}
     return withConnection(function(conn)
         local books, ids = {}, {}
         local res = conn:exec(string.format(FP_BOOKS, math.floor(limit or 6)))
-        for n = 1, (res and res[1] and #res[1] or 0) do
+        for n = 1, count(res) do
             local id = tonumber(column(res, 1, n))
             if id then
                 local title = column(res, 2, n)
-                books[#books + 1] = {
+                local b = {
                     id = id,
                     title = title ~= nil and tostring(title) or "",
                     pages = tonumber(column(res, 3, n)),
                     last_open = tonumber(column(res, 4, n)),
                 }
+                books[#books + 1] = b
                 ids[#ids + 1] = string.format("%d", id)
             end
         end
         local rows = {}
-        if #ids > 0 then
-            local r = conn:exec(string.format(FP_ROWS, table.concat(ids, ",")))
-            for n = 1, (r and r[1] and #r[1] or 0) do
-                rows[n] = {
-                    id_book = tonumber(column(r, 1, n)),
-                    page = tonumber(column(r, 2, n)),
-                    total_pages = tonumber(column(r, 3, n)),
-                    day = tonumber(column(r, 4, n)),
-                    secs = tonumber(column(r, 5, n)) or 0,
-                    last_seen = tonumber(column(r, 6, n)),
-                }
-            end
+        if #ids == 0 then return { books = books, rows = rows } end
+
+        local st = conn:exec(string.format(FP_STAMPS, table.concat(ids, ",")))
+        local stamps = {}
+        for n = 1, count(st) do
+            stamps[tonumber(column(st, 1, n))] = string.format("%s:%s:%s",
+                tostring(tonumber(column(st, 2, n))), tostring(tonumber(column(st, 3, n))),
+                tostring(tonumber(column(st, 4, n))))
+        end
+        local changed = {}
+        for _i, b in ipairs(books) do
+            b.sig = string.format("%s|%s|%s|%s", b.title, tostring(b.pages),
+                tostring(b.last_open), stamps[b.id] or "")
+            if known[b.id] ~= b.sig then changed[#changed + 1] = string.format("%d", b.id) end
+        end
+        if #changed == 0 then return { books = books, rows = rows } end
+
+        local r = conn:exec(string.format(FP_ROWS, table.concat(changed, ",")))
+        for n = 1, count(r) do
+            rows[n] = {
+                id_book = tonumber(column(r, 1, n)),
+                page = tonumber(column(r, 2, n)),
+                total_pages = tonumber(column(r, 3, n)),
+                day = tonumber(column(r, 4, n)),
+                secs = tonumber(column(r, 5, n)) or 0,
+                last_seen = tonumber(column(r, 6, n)),
+            }
         end
         return { books = books, rows = rows }
     end)

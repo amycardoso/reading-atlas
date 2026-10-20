@@ -48,13 +48,44 @@ package.loaded["lib/bookshelf_module_kit"] = {
     valueCard = function(o) return { card = true, heading = o.heading, value = o.value, sub = o.sub } end,
 }
 
--- The database is faked through the loader's memo.
-local db_answer, db_calls = nil, 0
+-- The database is faked through the loader's memo, keeping db.lua's
+-- contract: books ordered by last_open DESC, id (NULLs last) and capped, each
+-- with a sig, and page rows only for books whose sig is not in `known`.
+local db_answer, db_calls, db_rows_for = nil, 0, {}
 package.loaded["atlas/db"] = {
-    fingerprintRows = function(limit)
+    fingerprintRows = function(limit, known)
         db_calls = db_calls + 1
         assert(limit == 6, "asks for at most six books")
-        return db_answer
+        if db_answer == nil then return nil end
+        known = known or {}
+        local books = {}
+        for i, b in ipairs(db_answer.books) do books[i] = b end
+        table.sort(books, function(x, y)
+            local xo, yo = x.last_open or -1, y.last_open or -1
+            if xo ~= yo then return xo > yo end
+            return x.id < y.id
+        end)
+        while #books > limit do table.remove(books) end
+        local out, want = { books = {}, rows = {} }, {}
+        db_rows_for = {}
+        for _i, b in ipairs(books) do
+            local n, secs, last = 0, 0, 0
+            for _j, r in ipairs(db_answer.rows) do
+                if r.id_book == b.id then
+                    n = n + 1; secs = secs + r.secs
+                    last = math.max(last, r.last_seen or r.day or 0)
+                end
+            end
+            local sig = table.concat({ b.title, tostring(b.pages), tostring(b.last_open),
+                n .. ":" .. secs .. ":" .. last }, "|")
+            out.books[#out.books + 1] = { id = b.id, title = b.title, pages = b.pages,
+                last_open = b.last_open, sig = sig }
+            if known[b.id] ~= sig then want[b.id] = true; db_rows_for[#db_rows_for + 1] = b.id end
+        end
+        for _j, r in ipairs(db_answer.rows) do
+            if want[r.id_book] then out.rows[#out.rows + 1] = r end
+        end
+        return out
     end,
 }
 local Source = dofile("micromodules/atlas/source.lua")
@@ -71,6 +102,12 @@ F.prepare = function(...)
     return real_prepare(...)
 end
 package.loaded["atlas/fingerprint"] = F
+local real_analyze = F.analyze
+local analyze_calls = 0
+F.analyze = function(...)
+    analyze_calls = analyze_calls + 1
+    return real_analyze(...)
+end
 
 local FP = dofile("micromodules/atlas_fingerprint.lua")
 local raw_render = FP.render
@@ -274,7 +311,7 @@ end)
 
 t.test("an hourly refresh with nothing new reuses the analysis and repaints nothing", function()
     db_answer = sample()
-    prepare_calls = 0
+    analyze_calls = 0
     local repaints = 0
     local real_time = os.time
     local fake_now = real_time()
@@ -283,10 +320,12 @@ t.test("an hourly refresh with nothing new reuses the analysis and repaints noth
         local c = ctx{ refresh = function() repaints = repaints + 1 end }
         local first = settle(c)
         eq(repaints, 1, "the first load paints once")
+        eq(analyze_calls, 2, "two books analyzed once")
         fake_now = fake_now + 3600
         FP.render(c)
         runScheduled()
-        eq(prepare_calls, 1, "same data, no new analysis")
+        eq(db_rows_for, {}, "no page rows read for books nobody read")
+        eq(analyze_calls, 2, "same data, no new analysis")
         eq(repaints, 1, "and no repaint")
         eq(FP.render(c)[3] ~= nil, true)
         -- Now the reader reads a page: the next refresh does analyze again.
@@ -296,7 +335,8 @@ t.test("an hourly refresh with nothing new reuses the analysis and repaints noth
         fake_now = fake_now + 3600
         FP.render(c)
         runScheduled()
-        eq(prepare_calls, 2)
+        eq(db_rows_for, { 2 }, "rows only for the book read since")
+        eq(analyze_calls, 3, "and only that book analyzed again")
         eq(repaints, 2)
         local _ = first
     end)
@@ -322,6 +362,16 @@ t.test("time and pages go through gettext", function()
     for _i, key in ipairs({ "%d h %02d min", "%d p.", "%d%%" }) do
         assert(seen[key], key .. " is not translatable")
     end
+end)
+
+t.test("a one-page range reads 'p. 12', never 'p. 12–12'", function()
+    db_answer = {
+        books = { { id = 9, title = "Tiny", pages = 30, last_open = NOW } },
+        rows = { { id_book = 9, page = 1, total_pages = 30, day = 1, secs = 600 } },
+    }
+    local note = bookParts(settle(ctx()), 1).note.text
+    assert(note:find("lingered on p. 1 (10 min)", 1, true), note)
+    assert(not note:find("1–1", 1, true), note)
 end)
 
 t.test("as many books as the height allows, at least one", function()

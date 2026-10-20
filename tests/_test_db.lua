@@ -68,11 +68,19 @@ local ROWS = {
     { 60, 75, 90 },     -- secs
     { 1702000000, 1702000100, 1698000000 }, -- last_seen
 }
+local STAMPS = {
+    { 7, 3 },                    -- id_book
+    { 2, 1 },                    -- COUNT(*)
+    { 135, 90 },                 -- SUM(duration)
+    { 1702000100, 1698000000 },  -- MAX(start_time)
+}
+local SIG7 = "Grande Sertão: Veredas|624|1700000000|2:135:1702000100"
 
 t.test("books and rows come back as plain Lua values", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book"] = ROWS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
     local got = DB.fingerprintRows(6)
-    eq(got.books[1], { id = 7, title = "Grande Sertão: Veredas", pages = 624, last_open = 1700000000 })
+    eq(got.books[1], { id = 7, title = "Grande Sertão: Veredas", pages = 624,
+        last_open = 1700000000, sig = SIG7 })
     eq(type(got.books[2].title), "string")
     eq(#got.rows, 3)
     eq(got.rows[3], { id_book = 3, page = 10, total_pages = 688, day = 19650, secs = 90,
@@ -80,7 +88,7 @@ t.test("books and rows come back as plain Lua values", function()
 end)
 
 t.test("the title is read before the connection closes", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book"] = ROWS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
     local got = DB.fingerprintRows(6)
     assert(fake.closed, "connection closed")
     -- A wrapper kept past close() would raise here.
@@ -88,13 +96,13 @@ t.test("the title is read before the connection closes", function()
 end)
 
 t.test("opens read-only, limits the books, and asks only for their rows", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book"] = ROWS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
     DB.fingerprintRows(6)
     eq(fake.opened, { path = "/settings/statistics.sqlite3", mode = "ro" })
     local books_sql, rows_sql
     for _i, s in ipairs(fake.sql) do
         if s:find("SELECT id, title", 1, true) then books_sql = s end
-        if s:find("SELECT id_book", 1, true) then rows_sql = s end
+        if s:find("SELECT id_book, page", 1, true) then rows_sql = s end
     end
     assert(books_sql:find("LIMIT 6", 1, true), books_sql)
     assert(books_sql:find("total_read_time >= 600", 1, true), books_sql)
@@ -107,12 +115,49 @@ t.test("opens read-only, limits the books, and asks only for their rows", functi
     assert(rows_sql:find("MAX(start_time) AS last_seen", 1, true), rows_sql)
 end)
 
+t.test("a known book whose stamp is unchanged gets no page rows", function()
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    DB.fingerprintRows(6, { [7] = SIG7 })
+    local rows_sql
+    for _i, s in ipairs(fake.sql) do
+        if s:find("SELECT id_book, page", 1, true) then rows_sql = s end
+    end
+    assert(rows_sql:find("IN (3)", 1, true), "only Dune's rows: " .. rows_sql)
+end)
+
+t.test("when every book is known and unchanged, the page rows are not read at all", function()
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    local got = DB.fingerprintRows(6, { [7] = SIG7, [3] = "Dune|688|1690000000|1:90:1698000000" })
+    eq(#got.books, 2)
+    eq(got.rows, {})
+    for _i, s in ipairs(fake.sql) do
+        assert(not s:find("SELECT id_book, page", 1, true), "read rows for unchanged books")
+    end
+end)
+
+t.test("a retitled book is not unchanged", function()
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    local old = "Grande Sertao|624|1700000000|2:135:1702000100"
+    DB.fingerprintRows(6, { [7] = old })
+    local asked
+    for _i, s in ipairs(fake.sql) do
+        if s:find("SELECT id_book, page", 1, true) then asked = s end
+    end
+    assert(asked and asked:find("7", 1, true), "the title is part of the sig")
+end)
+
+t.test("books are ordered by last_open, then id, in SQL", function()
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    DB.fingerprintRows(6)
+    assert(fake.sql[2]:find("ORDER BY last_open DESC, id", 1, true), fake.sql[2])
+end)
+
 t.test("no qualifying book: an empty answer, and no second query", function()
     fake = newFake{}
     local got = DB.fingerprintRows(6)
     eq(got, { books = {}, rows = {} })
     for _i, s in ipairs(fake.sql) do
-        assert(not s:find("SELECT id_book", 1, true), "queried rows for no books")
+        assert(not s:find("SELECT id_book, page", 1, true), "queried rows for no books")
     end
 end)
 
@@ -124,7 +169,7 @@ end)
 
 t.test("a failing query is nil, and the connection is still closed", function()
     fake = newFake{ ["SELECT id, title"] = BOOKS }
-    fake.fail = "SELECT id_book"
+    fake.fail = "SELECT id_book, page"
     eq(DB.fingerprintRows(6), nil)
     assert(fake.closed, "connection closed after a failure")
 end)

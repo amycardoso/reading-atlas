@@ -12,8 +12,11 @@ local Widget = require("ui/widget/widget")
 
 local M = {}
 
--- The same five greys as the grid, from ink.lua next to this file.
-M.INK = dofile((debug.getinfo(1, "S").source:match("^@(.+/)") or "./") .. "ink.lua")
+-- Luminance per step, light to dark: atlas/ink.lua, through the loader, so
+-- the grid and the fingerprint's strips share one table (package.loaded
+-- "atlas/ink") and a retune changes every card together.
+local HERE = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
+M.INK = dofile(HERE .. "loader.lua").make(HERE .. "../")("ink")
 M.UNREAD = 0xD8
 M.REREAD = 0x00
 
