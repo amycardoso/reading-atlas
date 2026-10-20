@@ -27,6 +27,13 @@ local StripWidget = Widget:extend{}
 -- ink          the five greys, atlas("ink"): the caller's loader hands the
 --              same table to the grid, so every card paints one palette
 function StripWidget:init()
+    -- Cards pass ink = atlas("ink"). Without it, fall back to the loader's
+    -- copy if any card has loaded one, else ink.lua next to this file --
+    -- resolved here, at construction, never at load or inside a paint.
+    if not self.ink then
+        self.ink = package.loaded["atlas/ink"] or dofile(
+            (debug.getinfo(1, "S").source:match("^@(.+/)") or "./") .. "ink.lua")
+    end
     self.gap = self.gap or 2
     self.min_tick = self.min_tick or 3
     self.dimen = Geom:new{ w = self.width, h = self:height() }

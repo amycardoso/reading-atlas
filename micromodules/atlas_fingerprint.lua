@@ -16,40 +16,43 @@ local MAX_AGE = 3600
 
 -- The query reads the database AND analyzes every book, so the heavy part runs
 -- in the deferred callback, never on the paint path (source.lua, rule 1).
+-- Built once: render() runs several times per fit pass.
+local DEPS = {
+    query = function()
+        local F = atlas("fingerprint")
+        -- The previous answer's sigs let the database skip the page rows
+        -- of every book nobody read since, and prepare() reuse their
+        -- analysis; with nothing new at all, the old answer comes back
+        -- as is, and source.lua does not repaint the card.
+        local old = atlas("source").peek("fingerprint")
+        if type(old) ~= "table" then old = nil end
+        local known = {}
+        for _i, b in ipairs(old and old.books or {}) do known[b.id] = b.sig end
+        local data = atlas("db").fingerprintRows(F.MAX_BOOKS, known)
+        if data == nil then return nil end
+        local prep = F.prepare(data, old)
+        -- The status reads the clock: a book can turn "paused" with no
+        -- new data at all. Then the same books come back in a new table,
+        -- so source.lua repaints the card.
+        local now = os.time()
+        local statuses = {}
+        for i, b in ipairs(prep.books) do
+            statuses[i] = F.status(b.progress, b.last_open, now)
+        end
+        local key = table.concat(statuses, ",")
+        if rawequal(prep, old) and old.statuses ~= key then
+            prep = { books = old.books }
+        end
+        prep.statuses = key
+        return prep
+    end,
+    -- No books is data (read a little more), not "no database" (nil).
+    accept = function(result) return result ~= nil end,
+    max_age = MAX_AGE,
+}
+
 local function fetch(refresh)
-    return atlas("source").getKeyed("fingerprint", refresh, {
-        query = function()
-            local F = atlas("fingerprint")
-            -- The previous answer's sigs let the database skip the page rows
-            -- of every book nobody read since, and prepare() reuse their
-            -- analysis; with nothing new at all, the old answer comes back
-            -- as is, and source.lua does not repaint the card.
-            local old = atlas("source").peek("fingerprint")
-            if type(old) ~= "table" then old = nil end
-            local known = {}
-            for _i, b in ipairs(old and old.books or {}) do known[b.id] = b.sig end
-            local data = atlas("db").fingerprintRows(F.MAX_BOOKS, known)
-            if data == nil then return nil end
-            local prep = F.prepare(data, old)
-            -- The status reads the clock: a book can turn "paused" with no
-            -- new data at all. Then the same books come back in a new table,
-            -- so source.lua repaints the card.
-            local now = os.time()
-            local statuses = {}
-            for i, b in ipairs(prep.books) do
-                statuses[i] = F.status(b.progress, b.last_open, now)
-            end
-            local key = table.concat(statuses, ",")
-            if rawequal(prep, old) and old.statuses ~= key then
-                prep = { books = old.books }
-            end
-            prep.statuses = key
-            return prep
-        end,
-        -- No books is data (read a little more), not "no database" (nil).
-        accept = function(result) return result ~= nil end,
-        max_age = MAX_AGE,
-    })
+    return atlas("source").getKeyed("fingerprint", refresh, DEPS)
 end
 
 -- layout() once per prepared result, strip width and book count: the host
@@ -67,17 +70,14 @@ local function laidOut(prep, n, count)
     return memo[key]
 end
 
--- Month names through gettext, not os.date("%b"): KOReader leaves LC_TIME in
--- the C locale, so os.date would answer in English whatever the UI language.
-local MONTHS = { _("Jan"), _("Feb"), _("Mar"), _("Apr"), _("May"), _("Jun"),
-    _("Jul"), _("Aug"), _("Sep"), _("Oct"), _("Nov"), _("Dec") }
 
 -- "Mar" within the current year, "Mar 2025" before it: a book paused for
 -- more than a year must not read as paused this spring.
 local function since(t, now)
     local d = os.date("*t", t)
-    if d.year == os.date("*t", now).year then return MONTHS[d.month] end
-    return string.format("%s %d", MONTHS[d.month], d.year)
+    local months = atlas("months")
+    if d.year == os.date("*t", now).year then return months[d.month] end
+    return string.format("%s %d", months[d.month], d.year)
 end
 
 -- "45 min", "3 h 05 min": whole units through gettext, so the card needs no

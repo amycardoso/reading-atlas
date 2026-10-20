@@ -41,9 +41,12 @@ local function defaultSchedule(fn) require("ui/uimanager"):scheduleIn(0, fn) end
 -- the clock as they were the first time the card was drawn.
 M.HOURS_MAX_AGE = 3600
 
+-- Built once: render() asks for the hours several times per fit pass.
+local _hour_deps
 local function hourDeps()
+    if _hour_deps then return _hour_deps end
     local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
-    return {
+    _hour_deps = {
         -- With nothing read since, the old rows come back as the same object:
         -- no GROUP BY scan, and no repaint (see startQuery).
         query = function()
@@ -55,6 +58,7 @@ local function hourDeps()
         end,
         max_age = M.HOURS_MAX_AGE,
     }
+    return _hour_deps
 end
 
 -- Tests only.
@@ -79,10 +83,19 @@ end
 --                  really not there backs off to max_age.
 -- deps.now      -> the clock for max_age; defaults to os.time.
 --
+-- deps.same     -> optional same(old, new): true when a fresh answer shows the
+--                  same thing as the cached one. The old object is kept, so
+--                  memos keyed on it survive and nothing is repainted.
+--
 -- Callbacks fire only when what the card shows changed: a refresh whose
--- query returns the very object already cached, or a failure that leaves the
--- cache as it was, repaints nothing on e-ink. A query that can tell its
--- answer is unchanged returns the old object.
+-- query returns the very object already cached (or one deps.same calls
+-- equal), or a failure that leaves the cache as it was, repaints nothing on
+-- e-ink. A query that can tell its answer is unchanged returns the old object.
+--
+-- Two kinds of failure on a refresh: a query that raises or returns nil did
+-- not answer (a busy database) and keeps the last good result; a query that
+-- answered with something `accept` rejects (an empty database after the user
+-- reset their statistics) did answer, and the card shows that.
 local function addPending(s, refresh)
     if not refresh then return end
     -- The host renders a card several times while fitting it; one refresh
@@ -102,7 +115,16 @@ local function startQuery(s, deps)
         local ok, result = pcall(deps.query)
         local before = s.cache
         if ok and accept(result) then
+            if type(before) == "table" and deps.same and deps.same(before, result) then
+                result = before
+            end
             s.cache = result
+            s.failures = 0
+            s.at = clock()
+            s.due = deps.max_age and s.at + deps.max_age
+        elseif ok and result ~= nil then
+            -- Answered, and the answer is "nothing usable": say so.
+            s.cache = false
             s.failures = 0
             s.at = clock()
             s.due = deps.max_age and s.at + deps.max_age

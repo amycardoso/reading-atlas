@@ -348,6 +348,40 @@ t.test("phase 1's hour rows are refreshed hourly", function()
     eq(Source.HOURS_MAX_AGE, 3600)
 end)
 
+t.test("an emptied database on refresh shows as empty, not as the old rows", function()
+    Source.reset()
+    -- The default accept: a non-empty array. The user resets their statistics.
+    local d = agedDeps({ { "a" }, {} })
+    d.deps.accept = nil
+    Source.getKeyed("hours-like", nil, d.deps)
+    d.run()
+    d.advance(3600)
+    Source.getKeyed("hours-like", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("hours-like", nil, d.deps), false, "No statistics, not the deleted history")
+end)
+
+t.test("same(old, new) keeps the old object: no repaint, memos survive", function()
+    Source.reset()
+    local first = { "a" }
+    local d = agedDeps({ first, { "a" }, { "b" } })
+    d.deps.same = function(x, y) return x[1] == y[1] end
+    local fired = 0
+    local cb = function() fired = fired + 1 end
+    Source.getKeyed("map", cb, d.deps)
+    d.run()
+    d.advance(3600)
+    Source.getKeyed("map", cb, d.deps)
+    d.run()
+    assert(rawequal(Source.getKeyed("map", nil, d.deps), first), "the old object stays")
+    eq(fired, 1, "no repaint for an equal answer")
+    d.advance(3600)
+    Source.getKeyed("map", cb, d.deps)
+    d.run()
+    eq(Source.getKeyed("map", nil, d.deps)[1], "b")
+    eq(fired, 2)
+end)
+
 t.test("without max_age a key is queried once per session, as before", function()
     Source.reset()
     local d = agedDeps({ { "a" }, { "b" } })

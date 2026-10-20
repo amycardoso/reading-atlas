@@ -44,8 +44,9 @@ local function render(ctx)
     end
     local thresholds = Scale.thresholds(values)
 
-    -- One label at the first column of each month. os.date gives them in the
-    -- device's own language.
+    -- One label at the first column of each month, named through gettext
+    -- (atlas/months.lua): os.date("%b") would answer in English whatever the
+    -- UI language, KOReader leaving LC_TIME in the C locale.
     local months, last_month = {}, nil
     for col = 1, cal.weeks do
         for row = 1, 7 do
@@ -55,7 +56,7 @@ local function render(ctx)
                 if m ~= last_month then
                     last_month = m
                     months[#months + 1] = { col = col,
-                        text = os.date("%b", os.time{ year = year, month = m, day = 1, hour = 12 }) }
+                        text = atlas("months")[m] }
                 end
                 break
             end

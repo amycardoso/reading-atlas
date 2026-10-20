@@ -47,17 +47,48 @@ end
 
 local MAP_MAX_AGE = 6 * 3600
 
+-- A territory answer flattened to a string: every territory's name and each
+-- book's path and status, in order. Two walks of an unchanged library give
+-- the same string.
+local function libSig(lib)
+    local parts = {}
+    local function add(list)
+        for _i, b in ipairs(list or {}) do
+            parts[#parts + 1] = tostring(b.path) .. "=" .. tostring(b.status)
+        end
+    end
+    for _i, terr in ipairs(lib.territories or {}) do
+        parts[#parts + 1] = "#" .. tostring(terr.name)
+        add(terr.books)
+    end
+    parts[#parts + 1] = "#unassigned"
+    add(lib.unassigned)
+    return table.concat(parts, "\n")
+end
+
+-- One deps table per axis, built once: render() runs several times per fit.
+local _deps = {}
+local function depsFor(axis)
+    if not _deps[axis] then
+        _deps[axis] = {
+            query = function() return atlas("library").territories(axis) end,
+            -- An empty library is data ({}), not "bookshelf did not answer" (nil).
+            accept = function(result) return result ~= nil end,
+            -- Re-walk the library every few hours, so a book finished or
+            -- added shows up without restarting KOReader. Less often than the
+            -- statistics: a library changes slowly, and the walk is the most
+            -- expensive query any card makes.
+            max_age = MAP_MAX_AGE,
+            -- An unchanged library keeps the old answer: no repaint, and the
+            -- plan memo keyed on it survives.
+            same = function(a, b) return libSig(a) == libSig(b) end,
+        }
+    end
+    return _deps[axis]
+end
+
 local function fetch(axis, refresh)
-    return atlas("source").getKeyed("map:" .. axis, refresh, {
-        query = function() return atlas("library").territories(axis) end,
-        -- An empty library is data ({}), not "bookshelf did not answer" (nil).
-        accept = function(result) return result ~= nil end,
-        -- Re-walk the library every few hours, so a book finished or added
-        -- shows up without restarting KOReader. Less often than the
-        -- statistics: a library changes slowly, and the walk is the most
-        -- expensive query any card makes.
-        max_age = MAP_MAX_AGE,
-    })
+    return atlas("source").getKeyed("map:" .. axis, refresh, depsFor(axis))
 end
 
 -- The plan is the expensive part, and the host renders the same card several

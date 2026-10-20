@@ -86,11 +86,13 @@ local function currentPages(book, rows)
 end
 M.currentPages = currentPages
 
--- Time spread over n buckets. Returns secs[k] (seconds spent in bucket k),
+-- Time spread over n buckets. Returns secs[k] (reading seconds in bucket k),
 -- read[k] (true when any row touched it) and cover[k] (how much of bucket k
 -- the book's pages cover, in buckets). Coverage counts each page of each
 -- layout once: rows are per page PER DAY, and a page read on three days is
 -- still one page -- its time goes to secs three times, its width to cover once.
+-- Only visits of SKIM_SECS or more add seconds, as for progress: ten 3 s flips
+-- touch a page (step 0) but never ink it as read.
 local function addToBucket(k, f, acc, s, width)
     acc.secs[k] = acc.secs[k] + s * f
     acc.read[k] = true
@@ -108,7 +110,9 @@ function M.buckets(rows, n)
             local key = page .. ":" .. r.total_pages
             local width = nil
             if not seen[key] then seen[key] = true; width = (b - a) * n end
-            spread(a, b, n, addToBucket, acc, r.secs or 0, width)
+            local s = r.secs or 0
+            if s / math.max(1, r.visits or 1) < M.SKIM_SECS then s = 0 end
+            spread(a, b, n, addToBucket, acc, s, width)
         end
     end
     return acc.secs, acc.read, acc.cover

@@ -54,11 +54,12 @@ local function count(result)
     return result and result[1] and #result[1] or 0
 end
 
--- How many page rows there are and the latest start: if neither moved, nobody
--- read since, and the GROUP BY scan above need not run again. COUNT(*) walks
--- the smallest index; MAX(start_time) is one step down its own index.
+-- How many page rows there are, how much time, and the latest start: if none
+-- moved, nobody read since, and the GROUP BY scan above need not run again.
+-- The time is there because the statistics plugin can add duration to a row
+-- it already wrote; count and latest start alone would miss that.
 local HOUR_STAMP = [[
-    SELECT COUNT(*), MAX(start_time) FROM page_stat_data;
+    SELECT COUNT(*), SUM(duration), MAX(start_time) FROM page_stat_data;
 ]]
 
 -- Returns an array of { hour = n, secs = n } with a `stamp` field, or nil when
@@ -68,8 +69,8 @@ local HOUR_STAMP = [[
 function M.hourRows(known_stamp)
     return withConnection(function(conn)
         local st = conn:exec(HOUR_STAMP)
-        local stamp = string.format("%s:%s", tostring(tonumber(column(st, 1, 1))),
-            tostring(tonumber(column(st, 2, 1))))
+        local stamp = string.format("%s:%s:%s", tostring(tonumber(column(st, 1, 1))),
+            tostring(tonumber(column(st, 2, 1))), tostring(tonumber(column(st, 3, 1))))
         if known_stamp and known_stamp == stamp then return { unchanged = true } end
         local result = conn:exec(SQL)
         local out = { stamp = stamp }
@@ -128,6 +129,17 @@ local FP_ROWS = [[
     GROUP BY id_book, page, total_pages, day;
 ]]
 
+-- The local UTC offset in seconds, daylight saving included. The usual
+-- os.time(os.date("!*t")) trick reads the UTC fields as STANDARD time
+-- (isdst = false) and is an hour off all summer, so it would never notice a
+-- DST switch -- which moves 'localtime' midnight just like a timezone change.
+local function utcOffset(now)
+    local l, u = os.date("*t", now), os.date("!*t", now)
+    u.isdst = l.isdst
+    return os.difftime(os.time(l), os.time(u))
+end
+M.utcOffset = utcOffset
+
 -- Returns
 --   { books = { { id, title, pages, last_open, sig } },
 --     rows  = { { id_book, page, total_pages, day, secs, last_seen } } }
@@ -171,8 +183,7 @@ function M.fingerprintRows(limit, known)
         -- The local UTC offset is part of every sig: FP_ROWS splits days at
         -- local midnight, so a timezone change (travel, or the clock syncing
         -- after boot) changes every book's analysis even with no new reading.
-        local now = os.time()
-        local offset = os.difftime(now, os.time(os.date("!*t", now)))
+        local offset = utcOffset(os.time())
         local changed = {}
         for _i, b in ipairs(books) do
             b.sig = string.format("%s|%s|%s|%s|%d", b.title, tostring(b.pages),

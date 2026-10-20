@@ -295,7 +295,27 @@ A oitava rodada achou mais seis, todos corrigidos:
 6. `gridwidget` recebia os cinzas por um setter global; agora por opção
    (`ink`), como a faixa.
 
+A nona rodada achou mais oito, todos corrigidos:
+
+1. O deslocamento UTC na `sig` ignorava o horário de verão (`os.date("!*t")`
+   lido como hora padrão): uma troca de horário de verão nunca invalidava a
+   análise. Conferido em Nova York: −5 h em julho com a fórmula antiga, −4 h
+   com a nova.
+2. A densidade da faixa somava o tempo das folheadas, que o progresso
+   ignora; agora usa só as visitas de leitura, como o progresso.
+3. O carimbo das horas não incluía a soma das durações; agora inclui.
+4. Um banco esvaziado (estatísticas zeradas) numa renovação era tratado como
+   falha e o card mantinha o histórico apagado. Agora "respondeu vazio" é
+   diferente de "não respondeu".
+5. O mapa repintava a cada 6 h mesmo sem mudança. `source.lua` ganhou
+   `deps.same`; o mapa compara uma assinatura da biblioteca.
+6. Uma faixa criada sem `ink` quebraria na pintura; agora cai nos cinzas
+   compartilhados.
+7. O card do ano usava `os.date("%b")` (sempre em inglês). Os nomes dos meses
+   agora vêm de `atlas/months.lua`, pelo gettext, nos dois cards.
+8. `deps` era recriado a cada render; agora é criado uma vez.
+
 ## Resultado
 
-14 suítes, 254 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 259 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

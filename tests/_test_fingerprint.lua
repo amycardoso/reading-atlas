@@ -734,6 +734,14 @@ t.test("after a refresh, only the changed book's strip is spread again", functio
     eq(calls, 1, "Old is reused, its strip too")
 end)
 
+t.test("ten quick flips on a page touch it but never ink it as read", function()
+    local r = row(5, 10, 1, 30)
+    r.visits = 10
+    local d = F.density({ row(1, 10, 1, 60), r }, 10, 10)
+    eq(d[5], 0, "touched: step 0, no reading seconds")
+    near(d[1], 60)
+end)
+
 t.test("a long book read over many days analyzes quickly", function()
     local rows = {}
     -- 1500 pages over 300 days, five pages a day.

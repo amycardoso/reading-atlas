@@ -46,6 +46,13 @@ t.test("is a real Widget: event handling and lifecycle are inherited", function(
     eq(w:handleEvent({}), false)
 end)
 
+t.test("a strip built without ink falls back to the shared greys, not a crash", function()
+    local w = SW.new{ width = 2, strip_h = 10, tick_h = 3, levels = { 4, 4 } }
+    eq(w.ink, INK)
+    local rects = paint(w)
+    eq(rects[1].c, INK[4])
+end)
+
 t.test("getSize is the width by strip + gap + bar", function()
     local s = strip({ 1, 2, 3 }):getSize()
     eq(s.w, 3)
