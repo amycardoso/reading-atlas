@@ -10,7 +10,14 @@ local _ = require("lib/bookshelf_i18n").gettext
 
 local function render(ctx)
     local width, scale_pct, refresh = ctx.width, ctx.scale, ctx.refresh
-    local rows = atlas("source").get(refresh)
+    -- The Add picker previews every card cold, and must never be what starts
+    -- a query -- even a refresh, now that the hours expire hourly.
+    local rows
+    if ctx.preview then
+        rows = atlas("source").peek("hours")
+    else
+        rows = atlas("source").get(refresh)
+    end
 
     if rows == nil then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,

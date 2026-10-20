@@ -315,7 +315,21 @@ A nona rodada achou mais oito, todos corrigidos:
    agora vêm de `atlas/months.lua`, pelo gettext, nos dois cards.
 8. `deps` era recriado a cada render; agora é criado uma vez.
 
+Uma décima rodada, no nível `medium`, relatou dez achados; quatro eram bugs e
+foram corrigidos, os outros seis eram estilo ou custo e ficaram de fora:
+
+1. A cobertura contava páginas só folheadas, e um balde com leitura ao lado
+   de um trecho pulado saía pálido. Agora só página lida cobre.
+2. Com as horas renovadas de hora em hora, a prévia do Add picker passou a
+   disparar consulta nos cards do ano e das horas. Agora a prévia usa `peek`.
+3. A `sig` usava o deslocamento UTC do momento, e toda troca de horário de
+   verão refazia tudo à toa: o 'localtime' do SQLite aplica a cada linha o
+   horário de verão da data dela, então só uma troca de fuso move os cortes de
+   dia. Agora a `sig` leva o fuso (deslocamentos de janeiro e julho).
+4. Na virada do ano, "paused since Mar" devia virar "Mar 2026" mas o card não
+   repintava; o ano agora entra na chave de status.
+
 ## Resultado
 
-14 suítes, 259 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 263 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

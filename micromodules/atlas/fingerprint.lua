@@ -107,11 +107,13 @@ function M.buckets(rows, n)
         local r = rows[i]
         local a, b, page = rowSpan(r)
         if a then
-            local key = page .. ":" .. r.total_pages
-            local width = nil
-            if not seen[key] then seen[key] = true; width = (b - a) * n end
             local s = r.secs or 0
             if s / math.max(1, r.visits or 1) < M.SKIM_SECS then s = 0 end
+            -- Only a page READ covers: dividing by flipped pages too would
+            -- pale a bucket where reading happened next to a skipped stretch.
+            local key = page .. ":" .. r.total_pages
+            local width = nil
+            if s > 0 and not seen[key] then seen[key] = true; width = (b - a) * n end
             spread(a, b, n, addToBucket, acc, s, width)
         end
     end
@@ -128,7 +130,10 @@ function M.density(rows, n, pages)
     local per_bucket = pages / n
     local out = {}
     for k = 1, n do
-        if read[k] then out[k] = secs[k] / (cover[k] * per_bucket) end
+        if read[k] then
+            -- Touched but nothing read in it: 0 s a page, step 0.
+            out[k] = cover[k] > 0 and secs[k] / (cover[k] * per_bucket) or 0
+        end
     end
     return out
 end

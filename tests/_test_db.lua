@@ -77,7 +77,7 @@ local STAMPS = {
 }
 -- db.lua puts the local UTC offset at the end of every sig.
 local NOW = os.time()
-local OFFSET = string.format("|%d", DB.utcOffset(NOW))
+local OFFSET = "|" .. DB.zoneSig(NOW)
 local SIG7 = "Grande Sertão: Veredas|624|1700000000|2:135:1702000100" .. OFFSET
 
 t.test("books and rows come back as plain Lua values", function()
@@ -167,6 +167,13 @@ t.test("the UTC offset counts daylight saving", function()
     local day = (l.year * 1000 + l.yday) - (u.year * 1000 + u.yday)
     want = want + (day > 0 and 86400 or day < 0 and -86400 or 0)
     eq(DB.utcOffset(now), want)
+end)
+
+t.test("the zone sig names the timezone, not the season", function()
+    local y = os.date("*t").year
+    local jan = os.time{ year = y, month = 1, day = 20, hour = 12 }
+    local jul = os.time{ year = y, month = 7, day = 20, hour = 12 }
+    eq(DB.zoneSig(jan), DB.zoneSig(jul), "a DST switch does not change it")
 end)
 
 -- ── hourRows ───────────────────────────────────────────────────────────────

@@ -129,16 +129,28 @@ local FP_ROWS = [[
     GROUP BY id_book, page, total_pages, day;
 ]]
 
--- The local UTC offset in seconds, daylight saving included. The usual
--- os.time(os.date("!*t")) trick reads the UTC fields as STANDARD time
--- (isdst = false) and is an hour off all summer, so it would never notice a
--- DST switch -- which moves 'localtime' midnight just like a timezone change.
+-- The local UTC offset in seconds at `now`, daylight saving included. The
+-- usual os.time(os.date("!*t")) trick reads the UTC fields as STANDARD time
+-- (isdst = false) and is an hour off all summer.
 local function utcOffset(now)
     local l, u = os.date("*t", now), os.date("!*t", now)
     u.isdst = l.isdst
     return os.difftime(os.time(l), os.time(u))
 end
 M.utcOffset = utcOffset
+
+-- Which timezone this is, not which half of the year: the offsets in January
+-- and in July. SQLite's 'localtime' gives each row its OWN date's daylight
+-- saving, so a DST switch does not move any past day split -- only a change of
+-- timezone does, and only that should invalidate an analysis. Using the
+-- offset of the moment would redo every book twice a year for nothing.
+local function zoneSig(now)
+    local year = os.date("*t", now).year
+    local jan = os.time{ year = year, month = 1, day = 15, hour = 12 }
+    local jul = os.time{ year = year, month = 7, day = 15, hour = 12 }
+    return string.format("%d/%d", utcOffset(jan), utcOffset(jul))
+end
+M.zoneSig = zoneSig
 
 -- Returns
 --   { books = { { id, title, pages, last_open, sig } },
@@ -180,14 +192,14 @@ function M.fingerprintRows(limit, known)
                 tostring(tonumber(column(st, 2, n))), tostring(tonumber(column(st, 3, n))),
                 tostring(tonumber(column(st, 4, n))))
         end
-        -- The local UTC offset is part of every sig: FP_ROWS splits days at
-        -- local midnight, so a timezone change (travel, or the clock syncing
-        -- after boot) changes every book's analysis even with no new reading.
-        local offset = utcOffset(os.time())
+        -- The timezone is part of every sig: FP_ROWS splits days at local
+        -- midnight, so a timezone change (travel, or the clock syncing after
+        -- boot) changes every book's analysis even with no new reading.
+        local zone = zoneSig(os.time())
         local changed = {}
         for _i, b in ipairs(books) do
-            b.sig = string.format("%s|%s|%s|%s|%d", b.title, tostring(b.pages),
-                tostring(b.last_open), stamps[b.id] or "", offset)
+            b.sig = string.format("%s|%s|%s|%s|%s", b.title, tostring(b.pages),
+                tostring(b.last_open), stamps[b.id] or "", zone)
             if known[b.id] ~= b.sig then changed[#changed + 1] = string.format("%d", b.id) end
         end
         if #changed == 0 then return { books = books, rows = rows } end

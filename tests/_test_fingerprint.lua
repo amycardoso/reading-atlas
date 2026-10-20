@@ -742,6 +742,19 @@ t.test("ten quick flips on a page touch it but never ink it as read", function()
     near(d[1], 60)
 end)
 
+t.test("flipped pages next to read ones do not pale the bucket", function()
+    -- 100 pages on 10 buckets: in bucket 1, page 1 read at 60 s, pages 2..10
+    -- flipped at 2 s. The bucket's reading is 60 s over the one page read.
+    local rows = { row(1, 100, 1, 60) }
+    for p = 2, 10 do rows[#rows + 1] = row(p, 100, 1, 2) end
+    near(F.density(rows, 10, 100)[1], 60)
+end)
+
+t.test("a bucket only flipped through is touched, at 0 s a page", function()
+    local d = F.density({ row(1, 10, 1, 2) }, 10, 10)
+    eq(d[1], 0)
+end)
+
 t.test("a long book read over many days analyzes quickly", function()
     local rows = {}
     -- 1500 pages over 300 days, five pages a day.

@@ -39,7 +39,9 @@ local DEPS = {
         for i, b in ipairs(prep.books) do
             statuses[i] = F.status(b.progress, b.last_open, now)
         end
-        local key = table.concat(statuses, ",")
+        -- The year too: "paused since Mar" becomes "Mar 2026" on 1 January
+        -- with no status change at all.
+        local key = os.date("%Y", now) .. ":" .. table.concat(statuses, ",")
         if rawequal(prep, old) and old.statuses ~= key then
             prep = { books = old.books }
         end
