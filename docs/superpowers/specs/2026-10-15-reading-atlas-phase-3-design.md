@@ -142,7 +142,7 @@ que não foi.
 | 3 | `0x50` | |
 | 2 | `0x80` | |
 | 1 | `0xB0` | quartil mais rápido |
-| 0 | `0xE0` | tocado, abaixo do limiar do livro (≥ 5 s/página) |
+| 0 | `0xE0` | tocado, abaixo do limiar do livro (limiar mínimo: 5 s/página) |
 | não lido | linha pontilhada `0xD8` | |
 
 São os cinco tons do `gridwidget`, já validados no Paperwhite.

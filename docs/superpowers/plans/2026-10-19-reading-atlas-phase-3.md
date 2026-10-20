@@ -316,7 +316,7 @@ A nona rodada achou mais oito, todos corrigidos:
 8. `deps` era recriado a cada render; agora é criado uma vez.
 
 Uma décima rodada, no nível `medium`, relatou dez achados; quatro eram bugs e
-foram corrigidos, os outros seis eram estilo ou custo e ficaram de fora:
+foram corrigidos; os outros seis eram de estilo ou custo e ficaram de fora:
 
 1. A cobertura contava páginas só folheadas, e um balde com leitura ao lado
    de um trecho pulado saía pálido. Agora só página lida cobre.

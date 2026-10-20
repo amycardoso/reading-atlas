@@ -254,13 +254,25 @@ t.test("a book paused in an earlier year names the year", function()
     assert(note:find("paused since Mar " .. last_year, 1, true), note)
 end)
 
+-- The note of the book with this title, wherever the card sorted it.
+local function noteOf(card, title)
+    for i = 1, 6 do
+        local parts = bookParts(card, i)
+        if not (parts.line and parts.line[1]) then break end
+        if parts.line[1].text == title then return parts.note.text end
+    end
+    error("no book titled " .. title .. " on the card", 2)
+end
+
 t.test("a book paused earlier this year names only the month", function()
     local y = os.date("*t", NOW).year
     local jan = os.time{ year = y, month = 1, day = 1, hour = 12 }
     if NOW - jan < 30 * DAY then return end -- too early in the year to pause
     db_answer = sample()
     db_answer.books[2].last_open = jan
-    local note = bookParts(settle(ctx()), 2).note.text
+    -- By title, not position: from 31 January to 9 February, 1 January is
+    -- more recent than Dom Casmurro (NOW - 40 days) and sorts first.
+    local note = noteOf(settle(ctx()), "Ficciones")
     assert(note:find("paused since Jan$"), note)
 end)
 

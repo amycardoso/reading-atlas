@@ -183,9 +183,10 @@ Until phase 3 these were read once per KOReader session, so a KOReader left up
 for weeks of suspend and resume kept the first answer. For the fingerprint
 that was a bug, not staleness: a book read every day drifted to "paused".
 
-A failed query backs off from 5 minutes, doubling up to `max_age`: a busy
-database (the statistics plugin flushing) costs minutes, and a missing one is
-asked again only hourly.
+A failed query backs off from 5 minutes, doubling up to the card's `max_age`:
+a busy database (the statistics plugin flushing) costs minutes, and a missing
+one is asked again only once per `max_age` -- hourly for the statistics cards,
+every 6 hours for the map.
 
 ## A re-read later the same day is not detected
 
