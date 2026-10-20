@@ -23,10 +23,19 @@ local Grid = nil  -- injected below by the spec files' loader, or dofile'd
 
 local M = {}
 
--- Luminance per step, light to dark. Five steps is the ceiling for what is
--- reliably distinguishable on e-ink at this cell size; step 0 is a light grey
--- rather than white so a day without reading still reads as a cell.
-M.INK = { [0] = 0xE0, [1] = 0xB0, [2] = 0x80, [3] = 0x50, [4] = 0x20 }
+-- Luminance per step, light to dark: atlas/ink.lua. Cards pass their loader's
+-- copy as the `ink` option, as they do for the fingerprint's strips, so every
+-- card paints from one table and a retune changes them together. This default
+-- is for standalone use (the suites); resolved lazily, never at load, so a
+-- path problem cannot stop the module from loading.
+local Ink = nil
+function M.ink()
+    if not Ink then
+        local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
+        Ink = dofile(dir .. "ink.lua")
+    end
+    return Ink
+end
 
 -- `grid_mod` lets callers hand in the already-loaded Grid helper. Falls back
 -- to a sibling dofile so this file also works standalone in tests.
@@ -155,12 +164,13 @@ function GridWidget:paintTo(bb, x, y)
     end
     y = y + lh
     local step = g.cell + g.gap
+    local ink = self.ink or M.ink()
     for col = 1, self.cols do
         for row = 1, self.rows do
             local lv = self.level(col, row)
             if lv ~= nil then
                 bb:paintRect(x + (col - 1) * step, y + (row - 1) * step,
-                    g.cell, g.cell, Blitbuffer.Color8(M.INK[lv] or M.INK[0]))
+                    g.cell, g.cell, Blitbuffer.Color8(ink[lv] or ink[0]))
             end
         end
     end
@@ -179,6 +189,7 @@ function M.new(opts)
         face        = opts.face,
         label_color = opts.label_color,
         label_mode  = opts.label_mode,
+        ink         = opts.ink,
     }
 end
 

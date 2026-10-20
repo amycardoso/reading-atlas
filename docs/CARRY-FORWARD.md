@@ -4,23 +4,26 @@ Things learned while building phase 1 that will cost time — or break on the
 device — if they are forgotten. Kept in the repository because the scratch
 workspace they were discovered in does not survive.
 
-## Reading TEXT columns after closing the database will bite phase 3
+## Read every column before the connection closes
 
-Phase 1's query selects only integers, and `micromodules/atlas/db.lua` builds
-its rows **after** `conn:close()`. That is safe *only because the columns are
-integers*.
+Phase 1's query selects only integers, and `hourRows` in
+`micromodules/atlas/db.lua` builds its rows **after** `conn:close()`.
 
-In the `lua-ljsqlite3` that KOReader vendors, `conn:exec()` materialises INTEGER
-and FLOAT columns into independent Lua values, but a TEXT or BLOB column comes
-back as a pointer wrapper that is **not** copied. Reading one after the
-connection closes is undefined behaviour.
+This note used to say that TEXT columns come back from KOReader's vendored
+`lua-ljsqlite3` as pointer wrappers that are not copied. Checked against
+KOReader v2026.07 while building phase 3, that is not quite right:
+`common/lua-ljsqlite3/init.lua` copies TEXT with `ffi.string`, so a title is a
+real Lua string. INTEGER columns come back as `int64` cdata, which is why every
+value goes through `tonumber`. The column type that does stay tied to the
+statement is **BLOB**.
 
-Phase 2's territorial map ended up reading `title`, `authors`, `language` and
-`series` through bookshelf's own book repository instead, so this did not
-come up. Phase 3's fingerprint is the one that will hit it: it reads
-`book.title` from `statistics.sqlite3` directly. That value must be read into
-a Lua string **before** the connection closes, or copied explicitly. On an e-reader the failure mode is a crash, which for the
-user means a hard reboot.
+Phase 3's `fingerprintRows` reads `book.title`, the first TEXT column this
+project takes from `statistics.sqlite3`. It still turns every value into a plain
+Lua value **inside** the `pcall` and before `conn:close()`, and
+`tests/_test_db.lua` fails if a value is read after close. That costs nothing
+and holds even if a future KOReader changes how TEXT is returned. On an
+e-reader, reading freed memory is a crash, which for the user means a hard
+reboot.
 
 ## The host owns size; do not fight it
 
@@ -125,6 +128,37 @@ author axis such a library draws mostly "Others". That is the rule working,
 not a bug in `territory.lua` — but whether it is the right rule is a question
 for the device.
 
+## Phase 3: verify on the device before calling it done
+
+`atlas_fingerprint` passed every off-device suite. It also ran in KOReader
+v2026.07 desktop against a simulated `statistics.sqlite3` (six books, a font
+change mid-book, re-reads, a book paused for months) at Paperwhite and basic
+Kindle sizes, with no errors in the log. None of that is e-ink or a slow CPU:
+
+1. The card appears in the picker, and **tapping it does not take KOReader
+   down**.
+2. Titles appear correctly, accents included. This is the first TEXT read from
+   the statistics database.
+3. The query on a real database with years of reading does not freeze the menu.
+4. Strips of real books show structure, not uniform noise. If every strip
+   comes out one grey, the shared per-card quartiles are wrong for real data.
+5. The re-read bar is visible, and the dotted "not read yet" line reads as
+   the rest of the book on the panel, without vanishing or looking like ink.
+6. A book read with two different fonts shows no break in its strip.
+
+A known limit, kept on purpose: a book whose back matter (notes, bibliography,
+index) is longer than 3% of it never shows as finished from the statistics
+alone, because `statistics.sqlite3` does not know where the main text ends.
+KOReader's own "complete" status lives in the book's sidecar, which the `book`
+table does not link to a file. If real libraries show many such books stuck at
+85–95%, reading the sidecar status (through bookshelf's `Repo.progressFor`,
+as `atlas_map` does) is the fix.
+
+One behaviour to judge on the device rather than fix: in a cell shared with
+other cards, bookshelf picks the largest scale that fits, which can mean one
+book at a large size instead of several at a smaller one. Full screen shows
+six. The host owns size (above), so this is the rule working.
+
 ## bookshelf's group API is not a documented contract
 
 `atlas/library.lua` depends on `Repo.getGroupFilepaths`, `Repo.readProgress`
@@ -133,7 +167,31 @@ are public functions but not part of the micro-module README. If a bookshelf
 update renames one, the card shows "Unavailable" rather than crashing — that
 is what the `pcall`s are for, and `tests/_test_library.lua` holds them to it.
 
-## The library is read once per KOReader session
+## Every card refreshes on its own
 
-Like phase 1's statistics, each axis is cached for the life of the process.
-A book finished or added after the first render shows up after a restart.
+Each card's query has a `max_age` in `source.getKeyed`. Past it, the next
+render returns the old result and starts a fresh query off the paint path,
+and the card is redrawn only if what it shows changed:
+
+| Card | Key | max_age |
+|------|-----|---------|
+| Atlas year, Atlas hours | `hours` | 1 h |
+| Atlas fingerprint | `fingerprint` | 1 h |
+| Atlas map | `map:<axis>` | 6 h: a library changes slowly, and the walk is the most expensive query |
+
+Until phase 3 these were read once per KOReader session, so a KOReader left up
+for weeks of suspend and resume kept the first answer. For the fingerprint
+that was a bug, not staleness: a book read every day drifted to "paused".
+
+A failed query backs off from 5 minutes, doubling up to the card's `max_age`:
+a busy database (the statistics plugin flushing) costs minutes, and a missing
+one is asked again only once per `max_age` -- hourly for the statistics cards,
+every 6 hours for the map.
+
+## A re-read later the same day is not detected
+
+The fingerprint's page rows are summed per local day: that is what keeps a
+long book to a few thousand rows instead of one per page visit. So "re-read"
+means on a later day. Reading pages 1–100 in the morning and going back to
+10–30 the same evening shows no bar. Telling them apart would need the visits
+in order within a day, and so the full page_stat_data rows.

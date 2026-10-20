@@ -10,7 +10,14 @@ local _ = require("lib/bookshelf_i18n").gettext
 
 local function render(ctx)
     local width, scale_pct, refresh = ctx.width, ctx.scale, ctx.refresh
-    local rows = atlas("source").get(refresh)
+    -- The Add picker previews every card cold, and must never be what starts
+    -- a query -- even a refresh, now that the hours expire hourly.
+    local rows
+    if ctx.preview then
+        rows = atlas("source").peek("hours")
+    else
+        rows = atlas("source").get(refresh)
+    end
 
     if rows == nil then
         return Kit.valueCard{ width = width, scale_pct = scale_pct,
@@ -44,8 +51,9 @@ local function render(ctx)
     end
     local thresholds = Scale.thresholds(values)
 
-    -- One label at the first column of each month. os.date gives them in the
-    -- device's own language.
+    -- One label at the first column of each month, named through gettext
+    -- (atlas/months.lua): os.date("%b") would answer in English whatever the
+    -- UI language, KOReader leaving LC_TIME in the C locale.
     local months, last_month = {}, nil
     for col = 1, cal.weeks do
         for row = 1, 7 do
@@ -55,7 +63,7 @@ local function render(ctx)
                 if m ~= last_month then
                     last_month = m
                     months[#months + 1] = { col = col,
-                        text = os.date("%b", os.time{ year = year, month = m, day = 1, hour = 12 }) }
+                        text = atlas("months")[m] }
                 end
                 break
             end
@@ -86,6 +94,7 @@ local function render(ctx)
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
     local grid = GW.new{
+        ink = atlas("ink"),
         width = width, height = avail, cols = cal.weeks, rows = 7,
         col_labels = months, face = sface, label_color = Kit.COLOR_MUTED,
         level = function(col, row)

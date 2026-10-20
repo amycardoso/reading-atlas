@@ -157,6 +157,7 @@ t.test("with data, the card is heading, grid and context line", function()
     local grid = card[3]
     assert(grid.level, "the middle child should be the grid widget")
     eq(grid.label_mode, "truncate")
+    assert(rawequal(grid.ink, package.loaded["atlas/ink"]), "the grid paints the loader's greys")
     eq(grid.level(1, 1), 4, "English's finished book comes first")
 end)
 
@@ -246,6 +247,16 @@ t.test("a preview render after a normal render has settled shows the map", funct
     local card = Map.render(ctx{ preview = true })
     eq(card.card, nil, "must not be a valueCard once the cache is warm")
     eq(card[1].text, "Atlas map · Languages")
+end)
+
+t.test("the library is re-walked every few hours, not once per session", function()
+    local seen
+    local real = Source.getKeyed
+    Source.getKeyed = function(key, refresh, deps) seen = deps; return real(key, refresh, deps) end
+    library_answer = lib({}, {})
+    settle(ctx())
+    Source.getKeyed = real
+    assert(seen and seen.max_age and seen.max_age >= 3600, "map passes a max_age")
 end)
 
 t.done()

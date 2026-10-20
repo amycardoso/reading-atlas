@@ -175,4 +175,222 @@ t.test("peek returns the settled value after a query lands", function()
     eq(Source.peek("map:genre"), rows)
 end)
 
+-- ── max_age ────────────────────────────────────────────────────────────────
+-- A key with max_age re-queries once its result is old, but never makes the
+-- card fall back to "Reading…" in the meantime.
+
+local function agedDeps(results)
+    local clock, n = 1000, 0
+    local d = makeDeps(function() n = n + 1; return results[n] end)
+    d.deps.accept = function(r) return r ~= nil end
+    d.deps.max_age = 3600
+    d.deps.now = function() return clock end
+    d.advance = function(secs) clock = clock + secs end
+    d.calls = function() return n end
+    return d
+end
+
+t.test("a fresh result is served without re-querying", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, { "b" } })
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(3599)
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a")
+    eq(d.pendingCount(), 0, "not stale yet")
+end)
+
+t.test("a stale result is served while a fresh query runs off the paint path", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, { "b" } })
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(3600)
+    local refreshed = 0
+    eq(Source.getKeyed("fp", function() refreshed = refreshed + 1 end, d.deps)[1], "a",
+        "stale data, never nil")
+    eq(d.calls(), 1, "the new query must not run inside render")
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a", "a second render does not queue twice")
+    eq(d.pendingCount(), 1)
+    d.run()
+    eq(refreshed, 1, "the card is told to redraw")
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "b")
+end)
+
+t.test("a failed refresh keeps the last good result and retries in minutes", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, nil, { "c" } })
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(4000)
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a", "the last good result stays")
+    eq(d.pendingCount(), 0, "not retried on every render")
+    d.advance(299)
+    Source.getKeyed("fp", nil, d.deps)
+    eq(d.pendingCount(), 0, "not before the retry delay")
+    d.advance(1)
+    Source.getKeyed("fp", nil, d.deps)
+    eq(d.pendingCount(), 1, "retried after five minutes, not another hour")
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "c")
+end)
+
+t.test("the same refresh callback fires once, however many renders asked", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, { "b" } })
+    local fired = 0
+    local cb = function() fired = fired + 1 end
+    Source.getKeyed("fp", cb, d.deps)
+    Source.getKeyed("fp", cb, d.deps)
+    d.run()
+    eq(fired, 1, "first load")
+    d.advance(3600)
+    for _i = 1, 4 do Source.getKeyed("fp", cb, d.deps) end
+    d.run()
+    eq(fired, 2, "one more for the refresh, not four")
+end)
+
+t.test("failures back off from the retry delay to max_age", function()
+    Source.reset()
+    local d = agedDeps({ nil, nil, nil, nil, nil, nil, nil, { "late" } })
+    local function tick(secs)
+        d.advance(secs)
+        Source.getKeyed("fp", nil, d.deps)
+        local n = d.pendingCount()
+        d.run()
+        return n
+    end
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps), false)
+    -- 300, 600, 1200, 2400, then capped at 3600.
+    for _i, wait in ipairs({ 300, 600, 1200, 2400, 3600, 3600 }) do
+        eq(tick(wait - 1), 0, "not before " .. wait .. " s")
+        eq(tick(1), 1, "retried after " .. wait .. " s")
+    end
+    eq(Source.getKeyed("fp", nil, d.deps), false)
+    eq(tick(3600), 1)
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "late", "a database that appears is picked up")
+end)
+
+t.test("a busy database on the first query costs minutes, not an hour", function()
+    Source.reset()
+    local d = agedDeps({ nil, { "a" } })
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps), false)
+    d.advance(300)
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a")
+end)
+
+t.test("a failure that leaves the card as it was repaints nothing", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, nil, nil })
+    local fired = 0
+    local cb = function() fired = fired + 1 end
+    Source.getKeyed("fp", cb, d.deps)
+    d.run()
+    eq(fired, 1, "the first load paints")
+    d.advance(3600)
+    Source.getKeyed("fp", cb, d.deps)
+    d.run()
+    eq(fired, 1, "a failed refresh keeps the card: no repaint")
+    -- And a first query that fails does paint, once: Reading… becomes false.
+    Source.reset()
+    local e = agedDeps({ nil, nil })
+    local fired2 = 0
+    Source.getKeyed("fp", function() fired2 = fired2 + 1 end, e.deps)
+    e.run()
+    eq(fired2, 1)
+    e.advance(300)
+    Source.getKeyed("fp", function() fired2 = fired2 + 1 end, e.deps)
+    e.run()
+    eq(fired2, 1, "false stays false: no repaint")
+end)
+
+t.test("a refresh that returns the cached object repaints nothing", function()
+    Source.reset()
+    local same = { "a" }
+    local d = agedDeps({ same, same })
+    local fired = 0
+    local cb = function() fired = fired + 1 end
+    Source.getKeyed("fp", cb, d.deps)
+    d.run()
+    eq(fired, 1)
+    d.advance(3600)
+    Source.getKeyed("fp", cb, d.deps)
+    d.run()
+    eq(fired, 1, "unchanged: no repaint")
+    eq(d.pendingCount(), 0)
+    d.advance(3599)
+    Source.getKeyed("fp", nil, d.deps)
+    eq(d.pendingCount(), 0, "and the next refresh is a full max_age away")
+end)
+
+t.test("a clock moved back past the last query refreshes now, not in a year", function()
+    Source.reset()
+    local d = agedDeps({ { "wrong clock" }, { "fixed" } })
+    d.advance(365 * 86400) -- the device boots a year ahead
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(-365 * 86400) -- the clock is corrected
+    Source.getKeyed("fp", nil, d.deps)
+    eq(d.pendingCount(), 1, "a refresh is scheduled at once")
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "fixed")
+end)
+
+t.test("phase 1's hour rows are refreshed hourly", function()
+    eq(Source.HOURS_MAX_AGE, 3600)
+end)
+
+t.test("an emptied database on refresh shows as empty, not as the old rows", function()
+    Source.reset()
+    -- The default accept: a non-empty array. The user resets their statistics.
+    local d = agedDeps({ { "a" }, {} })
+    d.deps.accept = nil
+    Source.getKeyed("hours-like", nil, d.deps)
+    d.run()
+    d.advance(3600)
+    Source.getKeyed("hours-like", nil, d.deps)
+    d.run()
+    eq(Source.getKeyed("hours-like", nil, d.deps), false, "No statistics, not the deleted history")
+end)
+
+t.test("same(old, new) keeps the old object: no repaint, memos survive", function()
+    Source.reset()
+    local first = { "a" }
+    local d = agedDeps({ first, { "a" }, { "b" } })
+    d.deps.same = function(x, y) return x[1] == y[1] end
+    local fired = 0
+    local cb = function() fired = fired + 1 end
+    Source.getKeyed("map", cb, d.deps)
+    d.run()
+    d.advance(3600)
+    Source.getKeyed("map", cb, d.deps)
+    d.run()
+    assert(rawequal(Source.getKeyed("map", nil, d.deps), first), "the old object stays")
+    eq(fired, 1, "no repaint for an equal answer")
+    d.advance(3600)
+    Source.getKeyed("map", cb, d.deps)
+    d.run()
+    eq(Source.getKeyed("map", nil, d.deps)[1], "b")
+    eq(fired, 2)
+end)
+
+t.test("without max_age a key is queried once per session, as before", function()
+    Source.reset()
+    local d = agedDeps({ { "a" }, { "b" } })
+    d.deps.max_age = nil
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(10 * 86400)
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "a")
+    eq(d.pendingCount(), 0)
+end)
+
 t.done()
