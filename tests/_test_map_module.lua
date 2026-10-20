@@ -248,4 +248,14 @@ t.test("a preview render after a normal render has settled shows the map", funct
     eq(card[1].text, "Atlas map · Languages")
 end)
 
+t.test("the library is re-walked every few hours, not once per session", function()
+    local seen
+    local real = Source.getKeyed
+    Source.getKeyed = function(key, refresh, deps) seen = deps; return real(key, refresh, deps) end
+    library_answer = lib({}, {})
+    settle(ctx())
+    Source.getKeyed = real
+    assert(seen and seen.max_age and seen.max_age >= 3600, "map passes a max_age")
+end)
+
 t.done()

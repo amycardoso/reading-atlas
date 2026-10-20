@@ -23,11 +23,21 @@ local Grid = nil  -- injected below by the spec files' loader, or dofile'd
 
 local M = {}
 
--- Luminance per step, light to dark: atlas/ink.lua, through the loader, so
--- the grid and the fingerprint's strips share one table (package.loaded
--- "atlas/ink") and a retune changes every card together.
-local HERE = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
-M.INK = dofile(HERE .. "loader.lua").make(HERE .. "../")("ink")
+-- Luminance per step, light to dark: atlas/ink.lua. The cards hand in their
+-- loader's copy (setInk, like setGrid), so the grid and the fingerprint's
+-- strips paint from one table and a retune changes every card together.
+-- Resolved lazily, never at load: a path problem must not stop the module
+-- from loading.
+local Ink = nil
+function M.setInk(ink) Ink = ink end
+
+function M.ink()
+    if not Ink then
+        local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
+        Ink = dofile(dir .. "ink.lua")
+    end
+    return Ink
+end
 
 -- `grid_mod` lets callers hand in the already-loaded Grid helper. Falls back
 -- to a sibling dofile so this file also works standalone in tests.
@@ -156,12 +166,13 @@ function GridWidget:paintTo(bb, x, y)
     end
     y = y + lh
     local step = g.cell + g.gap
+    local ink = M.ink()
     for col = 1, self.cols do
         for row = 1, self.rows do
             local lv = self.level(col, row)
             if lv ~= nil then
                 bb:paintRect(x + (col - 1) * step, y + (row - 1) * step,
-                    g.cell, g.cell, Blitbuffer.Color8(M.INK[lv] or M.INK[0]))
+                    g.cell, g.cell, Blitbuffer.Color8(ink[lv] or ink[0]))
             end
         end
     end

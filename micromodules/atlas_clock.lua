@@ -60,6 +60,7 @@ local function render(ctx)
 
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
+    GW.setInk(atlas("ink"))
     local grid = GW.new{
         width = width, height = avail, cols = 24, rows = 7,
         col_labels = hours, face = sface, label_color = Kit.COLOR_MUTED,

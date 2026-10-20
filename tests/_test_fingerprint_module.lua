@@ -393,6 +393,24 @@ t.test("too short for one book and the legend: the legend goes", function()
         "no legend")
 end)
 
+t.test("29 of 100 pages reads 29%, not 28%", function()
+    db_answer = { books = { { id = 5, title = "B", pages = 100, last_open = NOW } }, rows = {} }
+    for p = 1, 29 do
+        db_answer.rows[#db_answer.rows + 1] = { id_book = 5, page = p, total_pages = 100, day = 1, secs = 60 }
+    end
+    local line = bookParts(settle(ctx()), 1).line[2][1].text
+    assert(line:find("· 29%", 1, true), line)
+end)
+
+t.test("a book only skimmed names no stretch it lingered on", function()
+    db_answer = { books = { { id = 6, title = "Skim", pages = 600, last_open = NOW } }, rows = {} }
+    for p = 1, 600 do
+        db_answer.rows[#db_answer.rows + 1] = { id_book = 6, page = p, total_pages = 600, day = 1, secs = 1 }
+    end
+    local note = bookParts(settle(ctx()), 1).note.text
+    assert(not note:find("lingered", 1, true), note)
+end)
+
 t.test("as many books as the height allows, at least one", function()
     db_answer = sample()
     -- heading 10 + span 6 + legend 10 = 26; a book is 10+2+20+2+4+10+7 = 55.

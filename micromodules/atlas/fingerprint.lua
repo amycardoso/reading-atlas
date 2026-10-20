@@ -51,9 +51,11 @@ local function rowSpan(row)
     return (p - 1) / tp, p / tp, p
 end
 
--- Calls fn(k, fraction) for each of n equal buckets the span [a, b) overlaps,
--- with the fraction of the span that falls in bucket k. The fractions sum to 1.
-local function spread(a, b, n, fn)
+-- Calls fn(k, fraction, x, y, z) for each of n equal buckets the span [a, b)
+-- overlaps, with the fraction of the span that falls in bucket k; the
+-- fractions sum to 1. State goes in x, y, z rather than in a closure, so the
+-- hot loops over thousands of rows allocate no function per row.
+local function spread(a, b, n, fn, x, y, z)
     local A, B = a * n, b * n
     local width = B - A
     if width <= 0 then return end
@@ -61,7 +63,7 @@ local function spread(a, b, n, fn)
     local last = math.min(n, math.ceil(B))
     for k = first, last do
         local overlap = math.min(B, k) - math.max(A, k - 1)
-        if overlap > EPS then fn(k, overlap / width) end
+        if overlap > EPS then fn(k, overlap / width, x, y, z) end
     end
 end
 
@@ -86,23 +88,21 @@ M.currentPages = currentPages
 -- Time spread over n buckets. Returns secs[k] (seconds spent in bucket k),
 -- read[k] (true when any row touched it) and cover[k] (how much of bucket k
 -- rows covered, in buckets, capped at 1: a page read twice is still one page).
+local function addToBucket(k, f, acc, s, width)
+    acc.secs[k] = acc.secs[k] + s * f
+    acc.read[k] = true
+    acc.cover[k] = math.min(1, acc.cover[k] + f * width)
+end
+
 function M.buckets(rows, n)
-    local secs, read, cover = {}, {}, {}
-    for k = 1, n do secs[k] = 0; cover[k] = 0 end
+    local acc = { secs = {}, read = {}, cover = {} }
+    for k = 1, n do acc.secs[k] = 0; acc.cover[k] = 0 end
     for i = 1, #rows do
         local r = rows[i]
         local a, b = rowSpan(r)
-        if a then
-            local s = r.secs or 0
-            local width = (b - a) * n
-            spread(a, b, n, function(k, f)
-                secs[k] = secs[k] + s * f
-                read[k] = true
-                cover[k] = math.min(1, cover[k] + f * width)
-            end)
-        end
+        if a then spread(a, b, n, addToBucket, acc, r.secs or 0, (b - a) * n) end
     end
-    return secs, read, cover
+    return acc.secs, acc.read, acc.cover
 end
 
 -- Seconds per page of each read bucket, in the book's current page count:
@@ -217,21 +217,23 @@ end
 -- layout counts once as a source, at the first current page it covers;
 -- spill[q] counts the sources that started before page q and still cover it,
 -- so the sources a window [lo, p] sees are the starts inside it plus spill[lo].
+local function addToTally(p, f, st, today, s)
+    st.secs[p] = st.secs[p] + s * f
+    today[p] = (today[p] or 0) + s * f
+    if not st.isread[p] and st.secs[p] >= st.thr then
+        st.isread[p] = true
+        fadd(st.reads, st.pages, p, 1)
+    end
+    st.first = st.first or p
+    st.last = p
+end
+
 local function tallyRow(st, r, today)
     local a, b, page = rowSpan(r)
     if not a then return end
-    local s = r.secs or 0
-    local first, last
-    spread(a, b, st.pages, function(p, f)
-        st.secs[p] = st.secs[p] + s * f
-        today[p] = (today[p] or 0) + s * f
-        if not st.isread[p] and st.secs[p] >= st.thr then
-            st.isread[p] = true
-            fadd(st.reads, st.pages, p, 1)
-        end
-        first = first or p
-        last = p
-    end)
+    st.first, st.last = nil, nil
+    spread(a, b, st.pages, addToTally, st, today, r.secs or 0)
+    local first, last = st.first, st.last
     if not first then return end
     local key = page .. ":" .. r.total_pages
     if not st.seen[key] then
@@ -251,17 +253,35 @@ local function qualifies(st, p)
     return reads >= math.ceil(len / 2) and sources >= math.min(2, len)
 end
 
--- The frontier, 0..1, after a day whose pages are the keys of `today`: only
--- windows containing one of them can have changed.
+-- The frontier, 0..1, after a day whose pages are the keys of `today`. Only
+-- the windows ending in [c, c + w - 1] for one of those pages c can have
+-- changed; those ranges are merged and scanned once, from the top down, and
+-- the first page that qualifies is the new frontier. Pages at or below the old
+-- frontier are never re-checked: it cannot move back.
 local function frontier(st, today)
-    local best = st.best
-    for c in pairs(today) do
-        for p = math.min(st.pages, c + st.w - 1), math.max(c, best + 1), -1 do
-            if qualifies(st, p) then best = p; break end
+    local cs = {}
+    for c in pairs(today) do cs[#cs + 1] = c end
+    table.sort(cs, function(x, y) return x > y end)
+    local best, w, pages = st.best, st.w, st.pages
+    local i = 1
+    while i <= #cs do
+        -- One merged range [lo, hi] of window ends, highest first.
+        local hi = math.min(pages, cs[i] + w - 1)
+        local lo = cs[i]
+        while i + 1 <= #cs and cs[i + 1] + w - 1 >= lo - 1 do
+            i = i + 1
+            lo = cs[i]
         end
+        if hi <= best then break end
+        for p = hi, math.max(lo, best + 1), -1 do
+            if qualifies(st, p) then
+                st.best = p
+                return p / pages
+            end
+        end
+        i = i + 1
     end
-    st.best = best
-    return best / st.pages
+    return best / pages
 end
 
 -- The stretch where the most time went: a window of max(10 pages, 2% of the

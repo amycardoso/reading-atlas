@@ -36,10 +36,16 @@ local function nonEmpty(result) return result ~= nil and #result > 0 end
 
 local function defaultSchedule(fn) require("ui/uimanager"):scheduleIn(0, fn) end
 
+-- Phase 1's hour rows are re-read hourly, like the fingerprint: a KOReader
+-- left up for weeks of suspend and resume would otherwise keep the year and
+-- the clock as they were the first time the card was drawn.
+M.HOURS_MAX_AGE = 3600
+
 local function hourDeps()
     local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
     return {
         query = function() return dofile(dir .. "db.lua").hourRows() end,
+        max_age = M.HOURS_MAX_AGE,
     }
 end
 

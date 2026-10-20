@@ -79,19 +79,19 @@ end)
 
 t.test("exposes one ink value per step, 0 through 4", function()
     for lv = 0, 4 do
-        assert(GW.INK[lv] ~= nil, "no ink for level " .. lv)
+        assert(GW.ink()[lv] ~= nil, "no ink for level " .. lv)
     end
 end)
 
 t.test("ink darkens monotonically as the level rises", function()
     for lv = 1, 4 do
-        assert(GW.INK[lv] < GW.INK[lv - 1],
+        assert(GW.ink()[lv] < GW.ink()[lv - 1],
             ("level %d should be darker than %d"):format(lv, lv - 1))
     end
 end)
 
 t.test("step 0 is grey, not white: an unread day stays part of the grid", function()
-    assert(GW.INK[0] < 255, "level 0 must not be pure white")
+    assert(GW.ink()[0] < 255, "level 0 must not be pure white")
 end)
 
 t.test("per-instance grid injection via opts.grid", function()
@@ -106,6 +106,12 @@ t.test("per-instance grid injection via opts.grid", function()
     local size = w:getSize()
     eq(size.w, 123)
     eq(size.h, 45)
+end)
+
+t.test("setInk hands in the cards' shared table", function()
+    local shared = dofile("micromodules/atlas/ink.lua")
+    GW.setInk(shared)
+    assert(rawequal(GW.ink(), shared))
 end)
 
 t.test("isolation: widget unaffected by setGrid after creation", function()
@@ -254,7 +260,7 @@ t.test("level 0 still paints, as the lightest grey", function()
                       level = function() return 0 end }
     local rects = paintedRects(w)
     eq(#rects, 2, "step 0 is a real cell and must be painted")
-    eq(rects[1].v, GW.INK[0])
+    eq(rects[1].v, GW.ink()[0])
 end)
 
 t.test("truncate mode draws every label, each capped at its own width", function()

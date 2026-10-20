@@ -45,17 +45,25 @@ local function withConnection(fn)
     return out
 end
 
+local function column(result, i, n)
+    local col = result and result[i]
+    return col and col[n]
+end
+
+local function count(result)
+    return result and result[1] and #result[1] or 0
+end
+
 -- Returns an array of { hour = n, secs = n }, or nil when there is no
 -- readable statistics database.
 function M.hourRows()
     return withConnection(function(conn)
         local result = conn:exec(SQL)
         local out = {}
-        if not result or not result[1] then return out end
-        for i = 1, #result[1] do
+        for i = 1, count(result) do
             out[i] = {
-                hour = tonumber(result[1][i]),
-                secs = tonumber(result[2][i]) or 0,
+                hour = tonumber(column(result, 1, i)),
+                secs = tonumber(column(result, 2, i)) or 0,
             }
         end
         return out
@@ -105,15 +113,6 @@ local FP_ROWS = [[
     GROUP BY id_book, page, total_pages, day;
 ]]
 
-local function column(result, i, n)
-    local col = result and result[i]
-    return col and col[n]
-end
-
-local function count(result)
-    return result and result[1] and #result[1] or 0
-end
-
 -- Returns
 --   { books = { { id, title, pages, last_open, sig } },
 --     rows  = { { id_book, page, total_pages, day, secs, last_seen } } }
@@ -154,10 +153,15 @@ function M.fingerprintRows(limit, known)
                 tostring(tonumber(column(st, 2, n))), tostring(tonumber(column(st, 3, n))),
                 tostring(tonumber(column(st, 4, n))))
         end
+        -- The local UTC offset is part of every sig: FP_ROWS splits days at
+        -- local midnight, so a timezone change (travel, or the clock syncing
+        -- after boot) changes every book's analysis even with no new reading.
+        local now = os.time()
+        local offset = os.difftime(now, os.time(os.date("!*t", now)))
         local changed = {}
         for _i, b in ipairs(books) do
-            b.sig = string.format("%s|%s|%s|%s", b.title, tostring(b.pages),
-                tostring(b.last_open), stamps[b.id] or "")
+            b.sig = string.format("%s|%s|%s|%s|%d", b.title, tostring(b.pages),
+                tostring(b.last_open), stamps[b.id] or "", offset)
             if known[b.id] ~= b.sig then changed[#changed + 1] = string.format("%d", b.id) end
         end
         if #changed == 0 then return { books = books, rows = rows } end

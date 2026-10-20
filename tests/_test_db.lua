@@ -74,7 +74,10 @@ local STAMPS = {
     { 135, 90 },                 -- SUM(duration)
     { 1702000100, 1698000000 },  -- MAX(start_time)
 }
-local SIG7 = "Grande Sertão: Veredas|624|1700000000|2:135:1702000100"
+-- db.lua puts the local UTC offset at the end of every sig.
+local NOW = os.time()
+local OFFSET = string.format("|%d", os.difftime(NOW, os.time(os.date("!*t", NOW))))
+local SIG7 = "Grande Sertão: Veredas|624|1700000000|2:135:1702000100" .. OFFSET
 
 t.test("books and rows come back as plain Lua values", function()
     fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
@@ -127,7 +130,7 @@ end)
 
 t.test("when every book is known and unchanged, the page rows are not read at all", function()
     fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
-    local got = DB.fingerprintRows(6, { [7] = SIG7, [3] = "Dune|688|1690000000|1:90:1698000000" })
+    local got = DB.fingerprintRows(6, { [7] = SIG7, [3] = "Dune|688|1690000000|1:90:1698000000" .. OFFSET })
     eq(#got.books, 2)
     eq(got.rows, {})
     for _i, s in ipairs(fake.sql) do
@@ -137,7 +140,7 @@ end)
 
 t.test("a retitled book is not unchanged", function()
     fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
-    local old = "Grande Sertao|624|1700000000|2:135:1702000100"
+    local old = "Grande Sertao|624|1700000000|2:135:1702000100" .. OFFSET
     DB.fingerprintRows(6, { [7] = old })
     local asked
     for _i, s in ipairs(fake.sql) do

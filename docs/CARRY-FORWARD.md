@@ -167,14 +167,30 @@ are public functions but not part of the micro-module README. If a bookshelf
 update renames one, the card shows "Unavailable" rather than crashing — that
 is what the `pcall`s are for, and `tests/_test_library.lua` holds them to it.
 
-## The library is read once per KOReader session
+## Every card refreshes on its own
 
-Like phase 1's statistics, each axis is cached for the life of the process.
-A book finished or added after the first render shows up after a restart.
+Each card's query has a `max_age` in `source.getKeyed`. Past it, the next
+render returns the old result and starts a fresh query off the paint path,
+and the card is redrawn only if what it shows changed:
 
-The fingerprint is the exception: its status ("reading" turning into "paused"
-after 30 days) depends on `book.last_open`, so a result kept for weeks of
-suspend and resume would call a book read every day paused. It passes
-`max_age = 3600` to `source.getKeyed`, which serves the old result while a
-fresh query runs off the paint path. Phase 1 and the map could opt in the
-same way if a stale card ever matters there.
+| Card | Key | max_age |
+|------|-----|---------|
+| Atlas year, Atlas hours | `hours` | 1 h |
+| Atlas fingerprint | `fingerprint` | 1 h |
+| Atlas map | `map:<axis>` | 6 h: a library changes slowly, and the walk is the most expensive query |
+
+Until phase 3 these were read once per KOReader session, so a KOReader left up
+for weeks of suspend and resume kept the first answer. For the fingerprint
+that was a bug, not staleness: a book read every day drifted to "paused".
+
+A failed query backs off from 5 minutes, doubling up to `max_age`: a busy
+database (the statistics plugin flushing) costs minutes, and a missing one is
+asked again only hourly.
+
+## A re-read later the same day is not detected
+
+The fingerprint's page rows are summed per local day: that is what keeps a
+long book to a few thousand rows instead of one per page visit. So "re-read"
+means on a later day. Reading pages 1–100 in the morning and going back to
+10–30 the same evening shows no bar. Telling them apart would need the visits
+in order within a day, and so the full page_stat_data rows.

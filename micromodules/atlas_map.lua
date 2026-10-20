@@ -45,11 +45,18 @@ local function axisOf(ctx)
     return axis
 end
 
+local MAP_MAX_AGE = 6 * 3600
+
 local function fetch(axis, refresh)
     return atlas("source").getKeyed("map:" .. axis, refresh, {
         query = function() return atlas("library").territories(axis) end,
         -- An empty library is data ({}), not "bookshelf did not answer" (nil).
         accept = function(result) return result ~= nil end,
+        -- Re-walk the library every few hours, so a book finished or added
+        -- shows up without restarting KOReader. Less often than the
+        -- statistics: a library changes slowly, and the walk is the most
+        -- expensive query any card makes.
+        max_age = MAP_MAX_AGE,
     })
 end
 
@@ -151,6 +158,7 @@ local function render(ctx)
 
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
+    GW.setInk(atlas("ink"))
     -- The label strip has to come out of avail's floor too: flooring at
     -- sc(20) alone left room for the strip only by accident, and a tiny
     -- ctx.height could floor avail at exactly sc(20), leaving grid_h at

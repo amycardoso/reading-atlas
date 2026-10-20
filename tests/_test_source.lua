@@ -344,6 +344,10 @@ t.test("a clock moved back past the last query refreshes now, not in a year", fu
     eq(Source.getKeyed("fp", nil, d.deps)[1], "fixed")
 end)
 
+t.test("phase 1's hour rows are refreshed hourly", function()
+    eq(Source.HOURS_MAX_AGE, 3600)
+end)
+
 t.test("without max_age a key is queried once per session, as before", function()
     Source.reset()
     local d = agedDeps({ { "a" }, { "b" } })

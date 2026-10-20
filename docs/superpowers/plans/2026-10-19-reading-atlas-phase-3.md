@@ -255,7 +255,27 @@ A sexta rodada achou mais oito, todos corrigidos:
 8. O caminho até `ink.lua` estava duplicado nos dois widgets. A faixa agora
    recebe os cinzas de quem a cria (`atlas("ink")`).
 
+A sétima rodada achou mais nove; oito corrigidos:
+
+1. A porcentagem saía 1% abaixo em alguns casos (29/100 × 100 = 28,999…).
+2. *Não corrigido, de propósito:* uma releitura no mesmo dia não aparece,
+   porque as linhas são somadas por dia. Registrado em `CARRY-FORWARD.md`.
+3. A `sig` não incluía o fuso: uma troca de fuso mudava onde os dias se
+   dividem sem invalidar a análise. Agora o deslocamento UTC entra na `sig`.
+4. Só a impressão digital se renovava. Agora os cards do ano e das horas
+   também (1 h), e o mapa a cada 6 h.
+5. "lingered on … (0 min)" não diz nada; agora sai só com 1 min ou mais.
+6. `gridwidget` carregava os cinzas pelo caminho do próprio arquivo ao ser
+   carregado, e um problema de caminho impediria o módulo de carregar. Agora
+   os cards entregam os cinzas (`setInk`, como `setGrid`) e o fallback é
+   preguiçoso.
+7. A fronteira re-checava janelas sobrepostas várias vezes; agora as faixas
+   candidatas são unidas e percorridas uma vez, de cima para baixo.
+8. Um closure por linha nos laços mais quentes; agora `spread` recebe o
+   estado como argumentos.
+9. `hourRows` lia o resultado à mão; agora usa os mesmos `column`/`count`.
+
 ## Resultado
 
-14 suítes, 241 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 246 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

@@ -83,7 +83,9 @@ local function meta(b, now)
     if statusOf(b, now) == "finished" then
         return hours(b.secs) .. " · " .. string.format(_("%d p."), b.pages)
     end
-    return hours(b.secs) .. " · " .. string.format(_("%d%%"), math.floor(b.progress * 100))
+    -- progress is best/pages in binary floating point: 29/100 * 100 is
+    -- 28.999…, so a hair is added before flooring or the card says 28%.
+    return hours(b.secs) .. " · " .. string.format(_("%d%%"), math.floor(b.progress * 100 + 1e-6))
 end
 
 -- "p. 12" or "p. 12–15": never "p. 12–12".
@@ -97,7 +99,9 @@ local function note(strip, now)
     local b = strip.book
     local parts = {}
     local s = strip.slowest
-    if s then
+    -- "lingered … (0 min)" claims nothing: a book only skimmed has no stretch
+    -- worth naming.
+    if s and math.floor(s.secs / 60 + 0.5) >= 1 then
         parts[#parts + 1] = string.format(_("lingered on %s (%d min)"),
             pageRange(s.from, s.to), math.floor(s.secs / 60 + 0.5))
     end
