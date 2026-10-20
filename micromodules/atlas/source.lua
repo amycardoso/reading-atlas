@@ -20,7 +20,7 @@
 -- a map from languages to authors can never be answered from the wrong cache.
 local M = {}
 
-local _state = {}   -- key -> { cache = nil|false|table, due = time to refresh, querying = bool, pending = {} }
+local _state = {}   -- key -> { cache, at = time settled, due = time to refresh, failures, querying, pending }
 
 local function stateFor(key)
     local s = _state[key]
@@ -79,7 +79,7 @@ local function addPending(s, refresh)
     s.pending[#s.pending + 1] = refresh
 end
 
-local function startQuery(s, deps, revalidating)
+local function startQuery(s, deps)
     s.querying = true
     local schedule = deps.schedule or defaultSchedule
     local accept = deps.accept or nonEmpty
@@ -90,7 +90,8 @@ local function startQuery(s, deps, revalidating)
         if ok and accept(result) then
             s.cache = result
             s.failures = 0
-            s.due = deps.max_age and clock() + deps.max_age
+            s.at = clock()
+            s.due = deps.max_age and s.at + deps.max_age
         else
             -- A failed refresh keeps the last good result: one bad read is no
             -- reason to blank a card that was showing data. A failed first
@@ -100,7 +101,8 @@ local function startQuery(s, deps, revalidating)
             s.failures = (s.failures or 0) + 1
             if deps.max_age then
                 local retry = deps.retry or math.min(deps.max_age, 300)
-                s.due = clock() + math.min(deps.max_age, retry * 2 ^ (s.failures - 1))
+                s.at = clock()
+                s.due = s.at + math.min(deps.max_age, retry * 2 ^ (s.failures - 1))
             end
         end
         local unchanged = rawequal(before, s.cache)
@@ -116,9 +118,14 @@ function M.getKeyed(key, refresh, deps)
     local s = stateFor(key)
     if s.cache ~= nil then
         local clock = deps.now or os.time
-        if deps.max_age and s.due and clock() >= s.due then
+        -- Due, or the clock went backwards past the last query: an e-reader's
+        -- clock is often corrected mid-session (it boots wrong, then syncs),
+        -- and an absolute due time set by a clock a year ahead would
+        -- otherwise freeze the card for that year.
+        local now = deps.max_age and s.due and clock()
+        if now and (now >= s.due or now < s.at) then
             addPending(s, refresh)
-            if not s.querying then startQuery(s, deps, true) end
+            if not s.querying then startQuery(s, deps) end
         end
         return s.cache
     end
@@ -129,7 +136,7 @@ function M.getKeyed(key, refresh, deps)
     -- that true.
     addPending(s, refresh)
     if s.querying then return nil end
-    startQuery(s, deps, false)
+    startQuery(s, deps)
     return nil
 end
 

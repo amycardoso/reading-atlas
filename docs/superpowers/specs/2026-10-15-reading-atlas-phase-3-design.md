@@ -14,7 +14,9 @@
 >   adiante tocada: uma olhada na última página, folhear até o fim ou uma
 >   página de um layout antigo não terminam um livro (`fingerprint.progress`).
 >   A releitura usa o mesmo progresso real como referência.
-> - Uma página folheada (< 5 s) num dia não é releitura dela.
+> - Uma página folheada ou consultada (abaixo do limiar do livro) num dia não é
+>   releitura dela. O limiar é um quarto do ritmo mediano do livro, ponderado
+>   pelo tempo, nunca menos que 5 s; ver a seção de degraus.
 > - O "dia" da regra de releitura é o dia local, não o UTC.
 > - "paused since" inclui o ano quando não é o ano corrente.
 > - A consulta é renovada de hora em hora (`max_age` em `source.lua`), em vez
@@ -128,8 +130,11 @@ um livro de 700 páginas somaria o dobro do tempo de um pixel de um livro de
 Os degraus 1 a 4 são os quartis de `scale.lua`, calculados sobre **todos os
 trechos lidos de todos os livros do card juntos**, para que os livros se
 comparem entre si: um livro difícil sai mais escuro que um fácil, não só
-diferente por dentro. O degrau 0 é *lido, mas de passagem*: menos de 5 s por
-página, o folhear.
+diferente por dentro. O degrau 0 é *tocado, mas não lido*: abaixo do limiar
+do livro — um quarto do ritmo mediano dele, ponderado pelo tempo, e nunca menos
+de 5 s por página. É o folhear e a consulta rápida a uma nota. O mesmo limiar
+decide o progresso, então a faixa não pinta como lido o que a porcentagem diz
+que não foi.
 
 | Degrau | Tom | Significado |
 |---|---|---|
@@ -137,7 +142,7 @@ página, o folhear.
 | 3 | `0x50` | |
 | 2 | `0x80` | |
 | 1 | `0xB0` | quartil mais rápido |
-| 0 | `0xE0` | folheado (< 5 s/página) |
+| 0 | `0xE0` | tocado, abaixo do limiar do livro (≥ 5 s/página) |
 | não lido | linha pontilhada `0xD8` | |
 
 São os cinco tons do `gridwidget`, já validados no Paperwhite.
@@ -285,7 +290,7 @@ livro + legenda. Fonte via `Kit.face`, espaço via `Kit.sc`.
     conta; trechos vizinhos se juntam;
   - janela mais lenta, incluindo livro mais curto que a janela;
   - status: terminado a 97%, lendo, pausado com o mês certo;
-  - degrau 0 para o folhear.
+  - degrau 0 para o que ficou abaixo do limiar do livro.
 - `_test_stripwidget.lua` (novo): tamanho, e que herda de `Widget`.
 - `_test_source.lua`: a chave `"fingerprint"` não compartilha cache.
 

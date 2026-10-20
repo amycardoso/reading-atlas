@@ -650,6 +650,29 @@ t.test("a page read over two short sessions counts as read, and its re-read show
     eq(rereads(rows, 100), { { from = 40, to = 45 } })
 end)
 
+-- ── review findings, round 6 ───────────────────────────────────────────────
+t.test("flipping through the rest twice does not finish a book", function()
+    -- 300 pages: 1..100 read at 60 s; 101..300 flipped at 3 s on day 2 and
+    -- again on day 3. Flips are most of the rows but little of the time.
+    local rows = {}
+    for p = 1, 100 do rows[#rows + 1] = row(p, 300, 1, 60) end
+    for d = 2, 3 do
+        for p = 101, 300 do rows[#rows + 1] = row(p, 300, d, 3) end
+    end
+    near(F.threshold(rows, 300), 15, "the pace where the time went: 60 s")
+    local an = F.analyze(rows, 300)
+    near(an.progress, 100 / 300)
+    eq(F.status(an.progress, 0, 0), "reading")
+end)
+
+t.test("a short book bridges a re-read that skips every other page", function()
+    -- 80 pages: bridge is at least one page, not floor(0.8) = 0.
+    local rows = {}
+    for p = 1, 80 do rows[#rows + 1] = row(p, 80, 1, 60) end
+    for p = 10, 30, 2 do rows[#rows + 1] = row(p, 80, 2, 60) end
+    eq(rereads(rows, 80), { { from = 10, to = 30 } })
+end)
+
 t.test("a long book read over many days analyzes quickly", function()
     local rows = {}
     -- 1500 pages over 300 days, five pages a day.

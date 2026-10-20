@@ -23,6 +23,7 @@ function WidgetStub:onCloseWidget() end
 package.loaded["ui/widget/widget"] = WidgetStub
 
 local SW = dofile("micromodules/atlas/stripwidget.lua")
+local INK = dofile("micromodules/atlas/ink.lua")
 
 local function paint(w)
     local rects = {}
@@ -34,7 +35,7 @@ end
 
 local function strip(levels, rereads, width)
     return SW.new{ width = width or #levels, strip_h = 10, tick_h = 3, gap = 2,
-        min_tick = 3, levels = levels, rereads = rereads or {} }
+        min_tick = 3, levels = levels, rereads = rereads or {}, ink = INK }
 end
 
 t.test("is a real Widget: event handling and lifecycle are inherited", function()
@@ -43,12 +44,6 @@ t.test("is a real Widget: event handling and lifecycle are inherited", function(
     assert(type(w.free) == "function", "free")
     assert(type(w.onCloseWidget) == "function", "onCloseWidget")
     eq(w:handleEvent({}), false)
-end)
-
-t.test("paints with the same greys as the grid", function()
-    local GW = dofile("micromodules/atlas/gridwidget.lua")
-    eq(SW.INK, dofile("micromodules/atlas/ink.lua"))
-    assert(rawequal(SW.INK, GW.INK), "one shared table, not two copies")
 end)
 
 t.test("getSize is the width by strip + gap + bar", function()
@@ -69,13 +64,13 @@ end)
 t.test("read runs paint one full-height rect each, in the step's ink", function()
     local rects = paint(strip({ 4, 4, 4, 1 }))
     eq(#rects, 2)
-    eq(rects[1], { x = 0, y = 0, w = 3, h = 10, c = SW.INK[4] })
-    eq(rects[2], { x = 3, y = 0, w = 1, h = 10, c = SW.INK[1] })
+    eq(rects[1], { x = 0, y = 0, w = 3, h = 10, c = INK[4] })
+    eq(rects[2], { x = 3, y = 0, w = 1, h = 10, c = INK[1] })
 end)
 
 t.test("step 0 is painted, light, never left blank", function()
     local rects = paint(strip({ 0 }))
-    eq(rects[1].c, SW.INK[0])
+    eq(rects[1].c, INK[0])
     eq(rects[1].h, 10)
 end)
 

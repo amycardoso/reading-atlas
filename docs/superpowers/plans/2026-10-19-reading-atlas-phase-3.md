@@ -234,7 +234,28 @@ A quinta rodada achou mais nove, todos corrigidos:
 9. `ink.lua` era carregado duas vezes, em duas tabelas. Agora passa pelo
    loader e é uma tabela só.
 
+A sexta rodada achou mais oito, todos corrigidos:
+
+1. A mediana do ritmo contava linhas: num livro lido por 100 páginas e
+   folheado por 200, as folheadas ditavam o ritmo (3 s), o limiar caía a 5 s
+   e duas folheadas de 3 s somavam "lida". A mediana agora é ponderada pelo
+   tempo: o ritmo em que foi gasta metade do tempo de leitura do livro.
+2. A ponte de releitura era 0 em livros com menos de 100 páginas; agora é
+   pelo menos 1.
+3. Um relógio corrigido para trás no meio da sessão congelava as renovações
+   até ele alcançar o horário antigo. Agora voltar para antes da última
+   consulta conta como vencido.
+4. Sem altura para um livro com a legenda, o card passava da altura que
+   recebeu. Agora a legenda sai primeiro.
+5. Um parâmetro morto (`revalidating`) em `source.lua`.
+6. O bit mais baixo da árvore de Fenwick era achado em laço; com o módulo
+   `bit` do LuaJIT, é `band(i, -i)`. O laço fica como alternativa para o
+   Lua 5.1 dos testes.
+7. A spec ainda dizia "< 5 s" para o degrau 0.
+8. O caminho até `ink.lua` estava duplicado nos dois widgets. A faixa agora
+   recebe os cinzas de quem a cria (`atlas("ink")`).
+
 ## Resultado
 
-14 suítes, 237 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 241 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

@@ -331,6 +331,19 @@ t.test("a refresh that returns the cached object repaints nothing", function()
     eq(d.pendingCount(), 0, "and the next refresh is a full max_age away")
 end)
 
+t.test("a clock moved back past the last query refreshes now, not in a year", function()
+    Source.reset()
+    local d = agedDeps({ { "wrong clock" }, { "fixed" } })
+    d.advance(365 * 86400) -- the device boots a year ahead
+    Source.getKeyed("fp", nil, d.deps)
+    d.run()
+    d.advance(-365 * 86400) -- the clock is corrected
+    Source.getKeyed("fp", nil, d.deps)
+    eq(d.pendingCount(), 1, "a refresh is scheduled at once")
+    d.run()
+    eq(Source.getKeyed("fp", nil, d.deps)[1], "fixed")
+end)
+
 t.test("without max_age a key is queried once per session, as before", function()
     Source.reset()
     local d = agedDeps({ { "a" }, { "b" } })

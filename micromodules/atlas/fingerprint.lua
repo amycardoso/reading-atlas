@@ -152,17 +152,28 @@ end
 -- The reading threshold for a book, in seconds per current page. Uses each
 -- row's own pace (its time over the current pages it spans), so it needs no
 -- spread and no second pass over the pages.
+--
+-- The median is weighted by time: the pace at which half the book's reading
+-- TIME was spent. A plain median counts rows, and in a book read for 100 pages
+-- and flipped through for 200, the flips would set the pace -- 3 s a page --
+-- and every flip would then count as reading.
 function M.threshold(rows, pages)
-    local paces = {}
+    local paces, total = {}, 0
     for i = 1, #rows do
         local r = rows[i]
-        if r.total_pages and r.total_pages > 0 and (r.secs or 0) > 0 then
-            paces[#paces + 1] = r.secs * r.total_pages / pages
+        local s = r.secs or 0
+        if r.total_pages and r.total_pages > 0 and s > 0 then
+            paces[#paces + 1] = { pace = s * r.total_pages / pages, secs = s }
+            total = total + s
         end
     end
     if #paces == 0 then return M.SKIM_SECS end
-    table.sort(paces)
-    local median = paces[math.floor((#paces + 1) / 2)]
+    table.sort(paces, function(x, y) return x.pace < y.pace end)
+    local acc, median = 0, paces[#paces].pace
+    for i = 1, #paces do
+        acc = acc + paces[i].secs
+        if acc >= total / 2 then median = paces[i].pace; break end
+    end
     return math.max(M.SKIM_SECS, median * M.LOOKUP_FRACTION)
 end
 
@@ -179,12 +190,19 @@ local function newTally(pages, thr)
     return st
 end
 
--- Fenwick tree helpers: point add, prefix sum. Lua 5.1 has no bit ops, so the
--- lowest set bit is found arithmetically.
-local function lowbit(i)
-    local b = 1
-    while i % (2 * b) == 0 do b = 2 * b end
-    return b
+-- Fenwick tree helpers: point add, prefix sum. KOReader's LuaJIT has the
+-- `bit` module, and band(i, -i) is the lowest set bit; a plain Lua 5.1
+-- running the suites does not, so it falls back to finding it arithmetically.
+local has_bit, bit = pcall(require, "bit")
+local lowbit
+if has_bit and bit and bit.band then
+    lowbit = function(i) return bit.band(i, -i) end
+else
+    lowbit = function(i)
+        local b = 1
+        while i % (2 * b) == 0 do b = 2 * b end
+        return b
+    end
 end
 local function fadd(tree, n, i, v)
     while i <= n do tree[i] = tree[i] + v; i = i + lowbit(i) end
@@ -323,7 +341,8 @@ function M.analyze(rows, pages)
     -- A re-read skips a page here and there, and a re-pagination makes a
     -- stretch land on every other page; gaps up to REREAD_BRIDGE of the book
     -- are bridged so one re-read is one bar, not a dashed line.
-    local bridge = math.floor(pages * M.REREAD_BRIDGE)
+    -- At least one page, or a book under 100 pages would bridge nothing.
+    local bridge = math.max(1, math.floor(pages * M.REREAD_BRIDGE))
     local out, k = {}, 1
     while k <= pages do
         if marked[k] then

@@ -374,13 +374,33 @@ t.test("a one-page range reads 'p. 12', never 'p. 12–12'", function()
     assert(not note:find("1–1", 1, true), note)
 end)
 
+t.test("the strip paints with the grid's greys: one table through the loader", function()
+    db_answer = sample()
+    local strip = bookParts(settle(ctx()), 1).strip
+    local ink = package.loaded["atlas/ink"]
+    assert(ink, "atlas/ink is loaded through the loader")
+    assert(rawequal(strip.ink, ink), "the strip got the loader's table")
+    eq(ink, dofile("micromodules/atlas/ink.lua"))
+end)
+
+t.test("too short for one book and the legend: the legend goes", function()
+    db_answer = sample()
+    -- heading 10 + span 6 + legend 10 = 26; one book is 55. 26 + 55 - 1 is
+    -- one pixel short of a book with the legend, but room without it.
+    local card = settle(ctx{ height = 26 + 55 - 1 })
+    eq((#card - 2) / 5, 1, "one book")
+    assert(card[#card].text ~= "darker = longer per page · bar below = re-read",
+        "no legend")
+end)
+
 t.test("as many books as the height allows, at least one", function()
     db_answer = sample()
     -- heading 10 + span 6 + legend 10 = 26; a book is 10+2+20+2+4+10+7 = 55.
     local function books(card) return (#card - 3) / 5 end
     eq(books(settle(ctx{ height = 26 + 55 })), 1)
     eq(books(settle(ctx{ height = 26 + 110 })), 2)
-    eq(books(settle(ctx{ height = 5 })), 1)
+    -- Far too short: one book, no legend, and the host shrinks the scale.
+    eq((#settle(ctx{ height = 5 }) - 2) / 5, 1)
 end)
 
 t.test("rendering twice at the same width reuses the layout", function()

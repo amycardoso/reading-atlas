@@ -168,6 +168,14 @@ local function render(ctx)
     probe:free(); sprobe:free()
     local chrome = heading:getSize().h + sc(6) + legend:getSize().h
     local fit = ctx.height and math.floor((ctx.height - chrome) / block_h) or 4
+    -- Not even one book with the legend: the legend goes first. Below that the
+    -- card is one book and the heading, and the host shrinks the scale until
+    -- it fits (it owns size; see CARRY-FORWARD.md).
+    local show_legend = true
+    if fit < 1 then
+        show_legend = false
+        legend:free()
+    end
     fit = math.max(1, math.min(fit, #prep.books))
 
     local strips = laidOut(prep, width, fit)
@@ -187,12 +195,13 @@ local function render(ctx)
             RightContainer:new{ dimen = Geom:new{ w = width, h = line_h }, right } }
         vg[#vg + 1] = VerticalSpan:new{ width = sc(2) }
         vg[#vg + 1] = SW.new{ width = width, strip_h = strip_h, tick_h = tick_h,
-            gap = gap, min_tick = min_tick, levels = s.levels, rereads = s.rereads }
+            gap = gap, min_tick = min_tick, levels = s.levels, rereads = s.rereads,
+            ink = atlas("ink") }
         vg[#vg + 1] = TextWidget:new{ text = note(s, now), face = sface,
             fgcolor = Kit.COLOR_MUTED, max_width = width }
         vg[#vg + 1] = VerticalSpan:new{ width = sc(7) }
     end
-    vg[#vg + 1] = legend
+    if show_legend then vg[#vg + 1] = legend end
     return vg
 end
 

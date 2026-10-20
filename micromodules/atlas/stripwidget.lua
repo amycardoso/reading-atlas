@@ -12,11 +12,6 @@ local Widget = require("ui/widget/widget")
 
 local M = {}
 
--- Luminance per step, light to dark: atlas/ink.lua, through the loader, so
--- the grid and the fingerprint's strips share one table (package.loaded
--- "atlas/ink") and a retune changes every card together.
-local HERE = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
-M.INK = dofile(HERE .. "loader.lua").make(HERE .. "../")("ink")
 M.UNREAD = 0xD8
 M.REREAD = 0x00
 
@@ -29,6 +24,8 @@ local StripWidget = Widget:extend{}
 -- min_tick     narrowest re-read bar, so a short re-read stays visible
 -- levels[k]    nil = not read, 0..4 = ink step
 -- rereads      { { from, to }, … } in bucket indexes
+-- ink          the five greys, atlas("ink"): the caller's loader hands the
+--              same table to the grid, so every card paints one palette
 function StripWidget:init()
     self.gap = self.gap or 2
     self.min_tick = self.min_tick or 3
@@ -77,7 +74,7 @@ function StripWidget:paintTo(bb, x, y)
                 bb:paintRect(px + dx, mid, 1, 1, Blitbuffer.Color8(M.UNREAD))
             end
         else
-            bb:paintRect(px, y, w, sh, Blitbuffer.Color8(M.INK[run.level] or M.INK[0]))
+            bb:paintRect(px, y, w, sh, Blitbuffer.Color8(self.ink[run.level] or self.ink[0]))
         end
     end
     local ty = y + sh + self.gap
