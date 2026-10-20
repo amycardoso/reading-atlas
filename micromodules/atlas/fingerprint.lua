@@ -31,6 +31,9 @@ M.FINISHED_AT = 0.97
 -- Real progress looks for reading in a window of this fraction of the book
 -- (at least 5 pages) ending at a page.
 M.PROGRESS_WINDOW = 0.02
+-- A page counts as read at this fraction of the book's median pace or more;
+-- below it, it was looked up (an endnote) or flipped past.
+M.LOOKUP_FRACTION = 0.25
 -- Overlaps below this (in buckets) are floating-point noise, not reading:
 -- (page - 1) / total_pages * n can land a hair past a bucket edge.
 local EPS = 1e-9
@@ -80,34 +83,39 @@ local function currentPages(book, rows)
 end
 M.currentPages = currentPages
 
--- Time spread over n buckets. Returns secs[k] (seconds spent in bucket k) and
--- read[k] (true when any row touched it).
+-- Time spread over n buckets. Returns secs[k] (seconds spent in bucket k),
+-- read[k] (true when any row touched it) and cover[k] (how much of bucket k
+-- rows covered, in buckets, capped at 1: a page read twice is still one page).
 function M.buckets(rows, n)
-    local secs, read = {}, {}
-    for k = 1, n do secs[k] = 0 end
+    local secs, read, cover = {}, {}, {}
+    for k = 1, n do secs[k] = 0; cover[k] = 0 end
     for i = 1, #rows do
         local r = rows[i]
         local a, b = rowSpan(r)
         if a then
             local s = r.secs or 0
+            local width = (b - a) * n
             spread(a, b, n, function(k, f)
                 secs[k] = secs[k] + s * f
                 read[k] = true
+                cover[k] = math.min(1, cover[k] + f * width)
             end)
         end
     end
-    return secs, read
+    return secs, read, cover
 end
 
--- Seconds per page of each read bucket, in the book's current page count.
--- Dividing by the bucket's width in pages is what keeps a long book from
--- reading darker than a short one at the same pace.
+-- Seconds per page of each read bucket, in the book's current page count:
+-- the bucket's time over the pages in it that were read. Measuring per page is
+-- what keeps a long book from reading darker than a short one at the same
+-- pace; dividing by the pages READ, not the bucket's full width, keeps a
+-- bucket at the edge of a skipped stretch from paling into "flipped past".
 function M.density(rows, n, pages)
-    local secs, read = M.buckets(rows, n)
+    local secs, read, cover = M.buckets(rows, n)
     local per_bucket = pages / n
     local out = {}
     for k = 1, n do
-        if read[k] then out[k] = secs[k] / per_bucket end
+        if read[k] then out[k] = secs[k] / (cover[k] * per_bucket) end
     end
     return out
 end
@@ -117,28 +125,74 @@ end
 -- day at a time so the re-read rule can ask "how far had the reader really
 -- got before this day?".
 --
+-- A page was READ when it got at least the book's reading threshold: a
+-- quarter of the reader's median seconds per page in this book, and never
+-- less than SKIM_SECS. Relative, because what tells reading from a look-up
+-- is the pace: an endnote checked for ten seconds in a book read at a minute a
+-- page is a look-up, not a page read.
+--
 -- How far the reader really got is the furthest page that
---   * was read, not flipped past (SKIM_SECS a page or more), and
+--   * was read, and
 --   * ends a window of max(5 pages, PROGRESS_WINDOW of the book) in which at
 --     least half the pages were read, coming from at least two different
 --     pages of the book in whatever layout they were read.
 -- The half rule keeps one look at the last page (the table of contents, an
--- endnote) from counting; the read-not-flipped rule keeps paging through to
--- the end from counting; the two-sources rule keeps one page of an old,
--- smaller-font layout -- which spans several current pages -- from counting.
--- Coverage alone would not do: a reader who skips an appendix still finished.
+-- endnote) from counting; the threshold keeps paging through to the end, and
+-- runs of endnote look-ups, from counting; the two-sources rule keeps one page
+-- of an old, smaller-font layout -- which spans several current pages -- from
+-- counting. Coverage alone would not do: a reader who skips an appendix still
+-- finished.
 --
--- Every count in the tally only grows, so a page that qualifies stays
--- qualified and the frontier never moves back. That is what lets it be kept
--- incrementally: after new rows, only pages whose window touches what changed
--- are re-checked, instead of the whole book after every reading day.
-local function newTally(pages)
+-- The threshold is fixed for the whole analysis and every count only grows,
+-- so a page that qualifies stays qualified and the frontier never moves back.
+-- That is what lets it be kept incrementally: after a day, only the windows
+-- that contain one of that day's pages are re-checked, each in O(log pages)
+-- through two Fenwick trees (pages read, sources started).
+
+-- The reading threshold for a book, in seconds per current page. Uses each
+-- row's own pace (its time over the current pages it spans), so it needs no
+-- spread and no second pass over the pages.
+function M.threshold(rows, pages)
+    local paces = {}
+    for i = 1, #rows do
+        local r = rows[i]
+        if r.total_pages and r.total_pages > 0 and (r.secs or 0) > 0 then
+            paces[#paces + 1] = r.secs * r.total_pages / pages
+        end
+    end
+    if #paces == 0 then return M.SKIM_SECS end
+    table.sort(paces)
+    local median = paces[math.floor((#paces + 1) / 2)]
+    return math.max(M.SKIM_SECS, median * M.LOOKUP_FRACTION)
+end
+
+local function newTally(pages, thr)
     local st = {
-        pages = pages, w = math.max(5, math.ceil(pages * M.PROGRESS_WINDOW)),
-        secs = {}, starts = {}, spill = {}, seen = {}, best = 0, top = 0,
+        pages = pages, thr = thr,
+        w = math.max(5, math.ceil(pages * M.PROGRESS_WINDOW)),
+        secs = {}, isread = {}, spill = {}, seen = {}, best = 0, top = 0,
+        reads = {}, starts = {}, -- Fenwick trees
     }
-    for p = 1, pages do st.secs[p] = 0; st.starts[p] = 0; st.spill[p] = 0 end
+    for p = 1, pages do
+        st.secs[p] = 0; st.spill[p] = 0; st.reads[p] = 0; st.starts[p] = 0
+    end
     return st
+end
+
+-- Fenwick tree helpers: point add, prefix sum. Lua 5.1 has no bit ops, so the
+-- lowest set bit is found arithmetically.
+local function lowbit(i)
+    local b = 1
+    while i % (2 * b) == 0 do b = 2 * b end
+    return b
+end
+local function fadd(tree, n, i, v)
+    while i <= n do tree[i] = tree[i] + v; i = i + lowbit(i) end
+end
+local function fsum(tree, i)
+    local s = 0
+    while i > 0 do s = s + tree[i]; i = i - lowbit(i) end
+    return s
 end
 
 -- Adds a row, and its seconds per page to `today`. Each distinct page of each
@@ -153,6 +207,10 @@ local function tallyRow(st, r, today)
     spread(a, b, st.pages, function(p, f)
         st.secs[p] = st.secs[p] + s * f
         today[p] = (today[p] or 0) + s * f
+        if not st.isread[p] and st.secs[p] >= st.thr then
+            st.isread[p] = true
+            fadd(st.reads, st.pages, p, 1)
+        end
         first = first or p
         last = p
     end)
@@ -160,36 +218,32 @@ local function tallyRow(st, r, today)
     local key = page .. ":" .. r.total_pages
     if not st.seen[key] then
         st.seen[key] = true
-        st.starts[first] = st.starts[first] + 1
+        fadd(st.starts, st.pages, first, 1)
         for q = first + 1, last do st.spill[q] = st.spill[q] + 1 end
     end
-    if not st.lo or first < st.lo then st.lo = first end
-    if not st.hi or last > st.hi then st.hi = last end
     if last > st.top then st.top = last end
 end
 
 local function qualifies(st, p)
-    if st.secs[p] < M.SKIM_SECS then return false end
+    if not st.isread[p] then return false end
     local lo = math.max(1, p - st.w + 1)
     local len = p - lo + 1
-    local reads, sources = 0, st.spill[lo]
-    for q = lo, p do
-        if st.secs[q] >= M.SKIM_SECS then reads = reads + 1 end
-        sources = sources + st.starts[q]
-    end
+    local reads = fsum(st.reads, p) - fsum(st.reads, lo - 1)
+    local sources = fsum(st.starts, p) - fsum(st.starts, lo - 1) + st.spill[lo]
     return reads >= math.ceil(len / 2) and sources >= math.min(2, len)
 end
 
--- The frontier, 0..1, after the rows tallied so far.
-local function frontier(st)
-    if st.lo then
-        local top = math.min(st.pages, st.hi + st.w - 1)
-        for p = top, math.max(st.lo, st.best + 1), -1 do
-            if qualifies(st, p) then st.best = p; break end
+-- The frontier, 0..1, after a day whose pages are the keys of `today`: only
+-- windows containing one of them can have changed.
+local function frontier(st, today)
+    local best = st.best
+    for c in pairs(today) do
+        for p = math.min(st.pages, c + st.w - 1), math.max(c, best + 1), -1 do
+            if qualifies(st, p) then best = p; break end
         end
-        st.lo, st.hi = nil, nil
     end
-    return st.best / st.pages
+    st.best = best
+    return best / st.pages
 end
 
 -- The stretch where the most time went: a window of max(10 pages, 2% of the
@@ -233,9 +287,9 @@ end
 --   slowest   the stretch where the most time went
 --
 -- A page is re-read on day d when
---   * it was READ (not flipped past) on an earlier day -- an earlier skim
---     makes today's reading the first, not a second,
---   * it is read, not flipped past, again on d, and
+--   * it was READ (at the threshold, not flipped past or looked up) on an
+--     earlier day -- an earlier skim makes today's reading the first,
+--   * it is read again on d, and
 --   * before d, the reader had REALLY got (the frontier, not the furthest page
 --     touched) at least REREAD_LEAD further on.
 -- The last condition keeps the page where one session ends and the next
@@ -243,7 +297,8 @@ end
 -- later session start into a re-read.
 function M.analyze(rows, pages)
     local by_day, days = byDay(rows)
-    local st = newTally(pages)
+    local thr = M.threshold(rows, pages)
+    local st = newTally(pages, thr)
     local first_day, marked = {}, {}
     local far_before = 0
     for _i, d in ipairs(days) do
@@ -252,14 +307,14 @@ function M.analyze(rows, pages)
         -- Days run in order and first_day is only set below, so a page with a
         -- first_day was first read on an earlier day.
         for p, s in pairs(today) do
-            if s >= M.SKIM_SECS then
+            if s >= thr then
                 if first_day[p] and far_before >= p / pages + M.REREAD_LEAD then
                     marked[p] = true
                 end
                 if not first_day[p] then first_day[p] = d end
             end
         end
-        far_before = frontier(st)
+        far_before = frontier(st, today)
     end
 
     -- A re-read skips a page here and there, and a re-pagination makes a
@@ -306,6 +361,23 @@ function M.status(progress, last_open, now)
     if progress >= M.FINISHED_AT then return "finished" end
     if last_open and now and now - last_open >= M.PAUSED_AFTER then return "paused" end
     return "reading"
+end
+
+-- A cheap fingerprint of a query result: when it matches the last one, the
+-- reader has not read since, and the previous analysis still stands.
+function M.signature(data)
+    local parts = {}
+    for _i, b in ipairs(data.books or {}) do
+        parts[#parts + 1] = string.format("%s:%s:%s", tostring(b.id),
+            tostring(b.last_open), tostring(b.pages))
+    end
+    local secs, seen = 0, 0
+    for _i, r in ipairs(data.rows or {}) do
+        secs = secs + (r.secs or 0)
+        if (r.last_seen or 0) > seen then seen = r.last_seen end
+    end
+    parts[#parts + 1] = string.format("%d:%.0f:%.0f", #(data.rows or {}), secs, seen)
+    return table.concat(parts, "|")
 end
 
 -- Books with their rows, most recently opened first, at most MAX_BOOKS, each

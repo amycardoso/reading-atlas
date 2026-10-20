@@ -23,10 +23,9 @@ local Grid = nil  -- injected below by the spec files' loader, or dofile'd
 
 local M = {}
 
--- Luminance per step, light to dark. Five steps is the ceiling for what is
--- reliably distinguishable on e-ink at this cell size; step 0 is a light grey
--- rather than white so a day without reading still reads as a cell.
-M.INK = { [0] = 0xE0, [1] = 0xB0, [2] = 0x80, [3] = 0x50, [4] = 0x20 }
+-- Luminance per step, light to dark: the greys shared with the fingerprint's
+-- strips, in ink.lua next to this file.
+M.INK = dofile((debug.getinfo(1, "S").source:match("^@(.+/)") or "./") .. "ink.lua")
 
 -- `grid_mod` lets callers hand in the already-loaded Grid helper. Falls back
 -- to a sibling dofile so this file also works standalone in tests.

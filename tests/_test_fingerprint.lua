@@ -505,12 +505,13 @@ local function bruteProgress(rows, pages)
         end
     end
     local w = math.max(5, math.ceil(pages * F.PROGRESS_WINDOW))
+    local thr = F.threshold(rows, pages)
     local best = 0
     for p = 1, pages do
-        if secs[p] >= F.SKIM_SECS then
+        if secs[p] >= thr then
             local lo = math.max(1, p - w + 1)
             local reads, sources = 0, 0
-            for q = lo, p do if secs[q] >= F.SKIM_SECS then reads = reads + 1 end end
+            for q = lo, p do if secs[q] >= thr then reads = reads + 1 end end
             for _i, sp in ipairs(spans) do
                 if sp[1] <= p and sp[2] >= lo then sources = sources + 1 end
             end
@@ -531,7 +532,8 @@ t.test("the incremental frontier matches the definition, day after day", functio
             local tp = (math.random() < 0.3) and math.random(10, 600) or pages
             local from = math.random(1, tp)
             for p = from, math.min(tp, from + math.random(0, 30)) do
-                rows[#rows + 1] = row(p, tp, d, math.random(0, 3) == 0 and 2 or 60)
+                local paces = { 2, 8, 12, 20, 60, 90, 150 }
+                rows[#rows + 1] = row(p, tp, d, paces[math.random(1, #paces)])
             end
             -- The incremental pass sees days in order; check it each day.
             local got = F.analyze(rows, pages).progress
@@ -541,6 +543,56 @@ t.test("the incremental frontier matches the definition, day after day", functio
             end
         end
     end
+end)
+
+-- ── review findings, round 4 ───────────────────────────────────────────────
+t.test("a run of endnote look-ups does not move progress", function()
+    -- 400 pages read at a minute a page; on day 1, pages 1..40, plus eight
+    -- endnote look-ups of 10 s landing on 350..354.
+    local rows = {}
+    for p = 1, 40 do rows[#rows + 1] = row(p, 400, 1, 60) end
+    for _i, p in ipairs({ 350, 351, 351, 352, 353, 353, 354, 354 }) do
+        rows[#rows + 1] = row(p, 400, 1, 10)
+    end
+    -- Day 2 resumes at page 40.
+    for p = 40, 80 do rows[#rows + 1] = row(p, 400, 2, 60) end
+    local an = F.analyze(rows, 400)
+    near(an.progress, 80 / 400)
+    eq(an.rereads, {}, "resuming is not re-reading")
+end)
+
+t.test("the threshold follows the reader's pace, never below SKIM_SECS", function()
+    local slow, fast = {}, {}
+    for p = 1, 50 do slow[p] = row(p, 50, 0, 120) end
+    for p = 1, 50 do fast[p] = row(p, 50, 0, 8) end
+    near(F.threshold(slow, 50), 30)
+    near(F.threshold(fast, 50), F.SKIM_SECS)
+    -- The pace is per CURRENT page: a row of an old 25-page layout spans two.
+    near(F.threshold({ row(1, 25, 0, 240) }, 50), 120 * F.LOOKUP_FRACTION)
+end)
+
+t.test("a bucket half read is measured over the page read, not its width", function()
+    -- 10 pages over 6 buckets: bucket 1 is pages [0, 1.67). Only page 1 read,
+    -- at 6 s: 6 s per page, not 6 / 1.67.
+    local d = F.density({ row(1, 10, 0, 6) }, 6, 10)
+    near(d[1], 6)
+end)
+
+t.test("a re-read page is darker, not diluted, at the same width", function()
+    local d = F.density({ row(1, 10, 0, 30), row(1, 10, 1, 30) }, 10, 10)
+    near(d[1], 60)
+end)
+
+t.test("a look-up near the end every day does not rescan the book", function()
+    local rows = {}
+    for d = 1, 300 do
+        for p = (d - 1) * 4 + 1, d * 4 do rows[#rows + 1] = row(p, 1500, d, 60) end
+        rows[#rows + 1] = row(1400 + d % 90, 1500, d, 10)
+    end
+    local t0 = os.clock()
+    F.analyze(rows, 1500)
+    local spent = os.clock() - t0
+    assert(spent < 0.5, ("took %.3f s"):format(spent))
 end)
 
 t.test("a long book read over many days analyzes quickly", function()

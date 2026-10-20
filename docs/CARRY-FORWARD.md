@@ -146,6 +146,14 @@ Kindle sizes, with no errors in the log. None of that is e-ink or a slow CPU:
    the rest of the book on the panel, without vanishing or looking like ink.
 6. A book read with two different fonts shows no break in its strip.
 
+A known limit, kept on purpose: a book whose back matter (notes, bibliography,
+index) is longer than 3% of it never shows as finished from the statistics
+alone, because `statistics.sqlite3` does not know where the main text ends.
+KOReader's own "complete" status lives in the book's sidecar, which the `book`
+table does not link to a file. If real libraries show many such books stuck at
+85–95%, reading the sidecar status (through bookshelf's `Repo.progressFor`,
+as `atlas_map` does) is the fix.
+
 One behaviour to judge on the device rather than fix: in a cell shared with
 other cards, bookshelf picks the largest scale that fits, which can mean one
 book at a large size instead of several at a smaller one. Full screen shows

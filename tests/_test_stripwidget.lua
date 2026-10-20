@@ -45,6 +45,12 @@ t.test("is a real Widget: event handling and lifecycle are inherited", function(
     eq(w:handleEvent({}), false)
 end)
 
+t.test("paints with the same greys as the grid", function()
+    local GW = dofile("micromodules/atlas/gridwidget.lua")
+    eq(SW.INK, GW.INK)
+    eq(SW.INK, dofile("micromodules/atlas/ink.lua"))
+end)
+
 t.test("getSize is the width by strip + gap + bar", function()
     local s = strip({ 1, 2, 3 }):getSize()
     eq(s.w, 3)

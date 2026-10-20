@@ -22,7 +22,14 @@ local function fetch(refresh)
             local F = atlas("fingerprint")
             local data = atlas("db").fingerprintRows(F.MAX_BOOKS)
             if data == nil then return nil end
-            return F.prepare(data)
+            -- Nothing read since the last query: hand back the same analysis,
+            -- which also tells source.lua not to repaint the card.
+            local sig = F.signature(data)
+            local old = atlas("source").peek("fingerprint")
+            if type(old) == "table" and old.sig == sig then return old end
+            local prep = F.prepare(data)
+            prep.sig = sig
+            return prep
         end,
         -- No books is data (read a little more), not "no database" (nil).
         accept = function(result) return result ~= nil end,
@@ -58,9 +65,12 @@ local function since(t, now)
     return string.format("%s %d", MONTHS[d.month], d.year)
 end
 
+-- "45 min", "3 h 05 min": whole units through gettext, so the card needs no
+-- decimal separator, which KOReader's C locale would print as "." anywhere.
 local function hours(secs)
-    if secs >= 3600 then return string.format("%.1f h", secs / 3600) end
-    return string.format("%d min", math.floor(secs / 60 + 0.5))
+    local mins = math.floor(secs / 60 + 0.5)
+    if mins < 60 then return string.format(_("%d min"), mins) end
+    return string.format(_("%d h %02d min"), math.floor(mins / 60), mins % 60)
 end
 
 local function statusOf(b, now)
@@ -70,9 +80,9 @@ end
 -- Right-hand side of the title line.
 local function meta(b, now)
     if statusOf(b, now) == "finished" then
-        return string.format("%s · %d p.", hours(b.secs), b.pages)
+        return hours(b.secs) .. " · " .. string.format(_("%d p."), b.pages)
     end
-    return string.format("%s · %d%%", hours(b.secs), math.floor(b.progress * 100))
+    return hours(b.secs) .. " · " .. string.format(_("%d%%"), math.floor(b.progress * 100))
 end
 
 -- The line under the strip.

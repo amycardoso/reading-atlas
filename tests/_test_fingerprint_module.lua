@@ -173,7 +173,7 @@ t.test("with data: heading, then title, strip and note per book, then legend", f
     eq(card[1].text, "Atlas fingerprint")
     local first = bookParts(card, 1)
     eq(first.line[1].text, "Ficciones", "most recently opened first")
-    eq(first.line[2][1].text, "1.2 h · 25%")
+    eq(first.line[2][1].text, "1 h 15 min · 25%")
     assert(first.strip.levels, "the strip widget sits under the title")
     eq(first.strip.width, 300)
     eq(card[#card].text, "darker = longer per page · bar below = re-read")
@@ -183,7 +183,7 @@ t.test("a finished book shows its pages, its re-read and no status", function()
     db_answer = sample()
     local second = bookParts(settle(ctx()), 2)
     eq(second.line[1].text, "Dom Casmurro")
-    eq(second.line[2][1].text, "1.8 h · 100 p.")
+    eq(second.line[2][1].text, "1 h 46 min · 100 p.")
     eq(second.note.text, "lingered on p. 36–45 (16 min) · re-read p. 40–45")
     assert(#second.strip.rereads == 1, "one re-read bar")
 end)
@@ -194,7 +194,7 @@ t.test("a look at the last page keeps a book in progress, with an honest percent
     db_answer.rows[#db_answer.rows + 1] =
         { id_book = 2, page = 200, total_pages = 200, day = 3, secs = 10 }
     local first = bookParts(settle(ctx()), 1)
-    eq(first.line[2][1].text, "1.3 h · 25%")
+    eq(first.line[2][1].text, "1 h 15 min · 25%")
     assert(first.note.text:find("· reading$"), first.note.text)
 end)
 
@@ -270,6 +270,58 @@ t.test("a book with no last_open is never called paused", function()
     assert(found, "Ficciones is on the card")
     assert(not found:find("paused", 1, true), found)
     assert(found:find("· reading$"), found)
+end)
+
+t.test("an hourly refresh with nothing new reuses the analysis and repaints nothing", function()
+    db_answer = sample()
+    prepare_calls = 0
+    local repaints = 0
+    local real_time = os.time
+    local fake_now = real_time()
+    os.time = function(tt) if tt then return real_time(tt) end return fake_now end
+    local ok, err = pcall(function()
+        local c = ctx{ refresh = function() repaints = repaints + 1 end }
+        local first = settle(c)
+        eq(repaints, 1, "the first load paints once")
+        fake_now = fake_now + 3600
+        FP.render(c)
+        runScheduled()
+        eq(prepare_calls, 1, "same data, no new analysis")
+        eq(repaints, 1, "and no repaint")
+        eq(FP.render(c)[3] ~= nil, true)
+        -- Now the reader reads a page: the next refresh does analyze again.
+        db_answer = sample()
+        db_answer.rows[#db_answer.rows + 1] =
+            { id_book = 2, page = 51, total_pages = 200, day = 4, secs = 90 }
+        fake_now = fake_now + 3600
+        FP.render(c)
+        runScheduled()
+        eq(prepare_calls, 2)
+        eq(repaints, 2)
+        local _ = first
+    end)
+    os.time = real_time
+    if not ok then error(err, 0) end
+end)
+
+t.test("time and pages go through gettext", function()
+    local seen = {}
+    local gettext = package.loaded["lib/bookshelf_i18n"].gettext
+    package.loaded["lib/bookshelf_i18n"].gettext = function(s) seen[s] = true; return s end
+    package.loaded["atlas/fingerprint"] = F
+    local Fresh = dofile("micromodules/atlas_fingerprint.lua")
+    db_answer = sample()
+    Source.reset()
+    scheduled = {}
+    Fresh.render(ctx())
+    runScheduled()
+    in_render = true
+    Fresh.render(ctx())
+    in_render = false
+    package.loaded["lib/bookshelf_i18n"].gettext = gettext
+    for _i, key in ipairs({ "%d h %02d min", "%d p.", "%d%%" }) do
+        assert(seen[key], key .. " is not translatable")
+    end
 end)
 
 t.test("as many books as the height allows, at least one", function()

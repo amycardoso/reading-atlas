@@ -64,10 +64,13 @@ end
 
 -- ── The fingerprint ─────────────────────────────────────────────────────────
 -- Books with more than ten minutes of reading, most recently opened first.
+-- Only books that still have page rows: one whose stats were reset would take
+-- a slot of the LIMIT and then be dropped, leaving the card a book short.
 local FP_BOOKS = [[
     SELECT id, title, pages, last_open
     FROM book
     WHERE total_read_time >= 600
+      AND EXISTS (SELECT 1 FROM page_stat_data WHERE id_book = book.id)
     ORDER BY last_open DESC
     LIMIT %d;
 ]]

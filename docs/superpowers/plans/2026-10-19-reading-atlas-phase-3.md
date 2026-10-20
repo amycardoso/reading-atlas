@@ -20,7 +20,8 @@ I/O, widget e composição, e por último o KOReader de verdade.
 - `analyze(rows, pages)`: a única entrada que `prepare` usa. Uma passada,
   uma contagem, devolvendo progresso, releituras e trecho mais lento.
 - Progresso: até onde o leitor chegou de fato — a página mais
-  adiante que foi **lida** (5 s/página ou mais, não folheada) e que fecha uma
+  adiante que foi **lida** (no limiar do livro: um quarto da mediana de
+  segundos por página, nunca menos que 5 s) e que fecha uma
   janela de max(5, 2% do livro) com pelo menos metade das páginas lidas,
   vindas de pelo menos **duas** páginas distintas do livro no layout em que
   foram lidas. Uma olhada no sumário, folhear até o fim, ou uma página de um
@@ -171,7 +172,41 @@ A terceira rodada achou mais nove:
 8. Uma condição sempre verdadeira (`first_day[p] < d`) foi removida.
 9. Dois comentários desatualizados (`install.sh`, `db.lua`).
 
+A quarta rodada achou mais nove; oito corrigidos:
+
+1. Uma série de consultas a notas no fim do livro (páginas vizinhas, 5–10 s
+   cada) movia o progresso. "Lida" agora é relativa ao ritmo do leitor naquele
+   livro: pelo menos um quarto da mediana de segundos por página
+   (`threshold`, `LOOKUP_FRACTION`), nunca menos que 5 s. O limiar é fixo
+   para a análise toda, então a fronteira continua monotônica.
+2. *Não corrigido, de propósito:* um livro cujo fim é 15% de notas e índice
+   nunca chega a "terminado" (97%). O `statistics.sqlite3` não sabe onde
+   termina o texto principal; baixar o limiar chamaria de terminado quem parou
+   em 85%. O status "complete" do KOReader mora no sidecar do livro, que a
+   tabela `book` não liga a um arquivo. Registrado em `CARRY-FORWARD.md`.
+3. A densidade dividia o tempo pela largura inteira do balde, inclusive
+   páginas não lidas, e bordas de trechos lidos saíam pálidas. Agora divide
+   pelas páginas lidas no balde (cobertura limitada a 1, para releitura ainda
+   escurecer).
+4. A fronteira re-checava uma faixa larga com O(janela) por página. Agora só
+   as janelas que contêm uma página do dia são re-checadas, cada uma em
+   O(log páginas) com duas árvores de Fenwick.
+5. Sem banco (cache `false`), cada renovação falha virava nova tentativa em
+   5 minutos. Agora espera `max_age`; os 5 minutos são só para quem já tinha
+   dado bom.
+6. `LIMIT 6` contava livros sem linhas em `page_stat_data`, e o card ficava
+   com menos de seis. A consulta agora exige `EXISTS`.
+7. "h", "min" e "p." eram fixos em inglês, e "3.5 h" usava ponto decimal.
+   Agora o tempo sai em unidades inteiras ("3 h 05 min") e tudo passa pelo
+   gettext.
+8. Cada renovação horária refazia a análise e repintava o card mesmo sem
+   leitura nova. Agora a consulta compara uma assinatura barata do resultado
+   e devolve a mesma análise; `source.lua` não dispara refresh quando o
+   objeto é o mesmo.
+9. Os cinco cinzas estavam copiados em `stripwidget.lua`; agora vêm de
+   `atlas/ink.lua`, compartilhado com `gridwidget.lua`.
+
 ## Resultado
 
-14 suítes, 215 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 225 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

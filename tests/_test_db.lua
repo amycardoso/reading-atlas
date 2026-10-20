@@ -70,7 +70,7 @@ local ROWS = {
 }
 
 t.test("books and rows come back as plain Lua values", function()
-    fake = newFake{ ["FROM book"] = BOOKS, ["FROM page_stat_data"] = ROWS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book"] = ROWS }
     local got = DB.fingerprintRows(6)
     eq(got.books[1], { id = 7, title = "Grande Sertão: Veredas", pages = 624, last_open = 1700000000 })
     eq(type(got.books[2].title), "string")
@@ -80,7 +80,7 @@ t.test("books and rows come back as plain Lua values", function()
 end)
 
 t.test("the title is read before the connection closes", function()
-    fake = newFake{ ["FROM book"] = BOOKS, ["FROM page_stat_data"] = ROWS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book"] = ROWS }
     local got = DB.fingerprintRows(6)
     assert(fake.closed, "connection closed")
     -- A wrapper kept past close() would raise here.
@@ -88,16 +88,18 @@ t.test("the title is read before the connection closes", function()
 end)
 
 t.test("opens read-only, limits the books, and asks only for their rows", function()
-    fake = newFake{ ["FROM book"] = BOOKS, ["FROM page_stat_data"] = ROWS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book"] = ROWS }
     DB.fingerprintRows(6)
     eq(fake.opened, { path = "/settings/statistics.sqlite3", mode = "ro" })
     local books_sql, rows_sql
     for _i, s in ipairs(fake.sql) do
-        if s:find("FROM book", 1, true) then books_sql = s end
-        if s:find("FROM page_stat_data", 1, true) then rows_sql = s end
+        if s:find("SELECT id, title", 1, true) then books_sql = s end
+        if s:find("SELECT id_book", 1, true) then rows_sql = s end
     end
     assert(books_sql:find("LIMIT 6", 1, true), books_sql)
     assert(books_sql:find("total_read_time >= 600", 1, true), books_sql)
+    assert(books_sql:find("EXISTS (SELECT 1 FROM page_stat_data WHERE id_book = book.id)", 1, true),
+        "a book without page rows must not take a slot: " .. books_sql)
     assert(rows_sql:find("IN (7,3)", 1, true), rows_sql)
     -- Days split at the reader's midnight, not UTC's.
     assert(rows_sql:find("'unixepoch', 'localtime'", 1, true), rows_sql)
@@ -110,7 +112,7 @@ t.test("no qualifying book: an empty answer, and no second query", function()
     local got = DB.fingerprintRows(6)
     eq(got, { books = {}, rows = {} })
     for _i, s in ipairs(fake.sql) do
-        assert(not s:find("page_stat_data", 1, true), "queried rows for no books")
+        assert(not s:find("SELECT id_book", 1, true), "queried rows for no books")
     end
 end)
 
@@ -121,8 +123,8 @@ t.test("a missing database is nil, not an error", function()
 end)
 
 t.test("a failing query is nil, and the connection is still closed", function()
-    fake = newFake{ ["FROM book"] = BOOKS }
-    fake.fail = "page_stat_data"
+    fake = newFake{ ["SELECT id, title"] = BOOKS }
+    fake.fail = "SELECT id_book"
     eq(DB.fingerprintRows(6), nil)
     assert(fake.closed, "connection closed after a failure")
 end)

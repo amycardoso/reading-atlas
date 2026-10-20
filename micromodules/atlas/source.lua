@@ -62,6 +62,10 @@ end
 --                  statistics plugin flushing) should cost minutes, not
 --                  another whole max_age of stale data.
 -- deps.now      -> the clock for max_age; defaults to os.time.
+--
+-- A refresh whose query returns the very object already cached changed
+-- nothing: the callbacks do not fire, so e-ink is not repainted with the same
+-- card. A query that can tell its answer is unchanged returns the old object.
 local function addPending(s, refresh)
     if not refresh then return end
     -- The host renders a card several times while fitting it; one refresh
@@ -79,14 +83,20 @@ local function startQuery(s, deps, revalidating)
     local clock = deps.now or os.time
     schedule(function()
         local ok, result = pcall(deps.query)
+        local unchanged = false
         if ok and accept(result) then
+            unchanged = revalidating and rawequal(result, s.cache)
             s.cache = result
             s.due = deps.max_age and clock() + deps.max_age
-        elseif revalidating then
+        elseif revalidating and s.cache then
             -- A failed REfresh keeps the last good result: one bad read is no
             -- reason to blank a card that was showing data. Try again soon.
             local retry = deps.retry or math.min(deps.max_age, 300)
             s.due = clock() + retry
+        elseif revalidating then
+            -- Still nothing usable (no database yet): ask again in max_age,
+            -- not every few minutes.
+            s.due = clock() + deps.max_age
         else
             -- Never leave the cache at nil here, or the module would
             -- re-query on every single render.
@@ -96,6 +106,7 @@ local function startQuery(s, deps, revalidating)
         s.querying = false
         local callbacks = s.pending
         s.pending = {}
+        if unchanged then return end
         for i = 1, #callbacks do pcall(callbacks[i]) end
     end)
 end

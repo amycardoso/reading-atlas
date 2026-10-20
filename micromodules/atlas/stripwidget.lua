@@ -12,8 +12,8 @@ local Widget = require("ui/widget/widget")
 
 local M = {}
 
--- Same five greys as the grid, already validated on a Paperwhite.
-M.INK = { [0] = 0xE0, [1] = 0xB0, [2] = 0x80, [3] = 0x50, [4] = 0x20 }
+-- The same five greys as the grid, from ink.lua next to this file.
+M.INK = dofile((debug.getinfo(1, "S").source:match("^@(.+/)") or "./") .. "ink.lua")
 M.UNREAD = 0xD8
 M.REREAD = 0x00
 
