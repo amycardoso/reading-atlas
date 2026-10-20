@@ -275,7 +275,27 @@ A sétima rodada achou mais nove; oito corrigidos:
    estado como argumentos.
 9. `hourRows` lia o resultado à mão; agora usa os mesmos `column`/`count`.
 
+A oitava rodada achou mais seis, todos corrigidos:
+
+1. A cobertura de um balde somava cada linha, e uma página lida em três dias
+   contava como três páginas: a densidade saía três vezes mais clara. Agora
+   cada página de cada layout cobre uma vez só.
+2. Folheadas abaixo de 5 s somavam até "lida" (duas de 4 s, em dias
+   diferentes ou ida e volta no mesmo dia). Agora só visitas longas o bastante
+   para serem leitura (5 s ou mais por visita) contam; a consulta traz
+   `COUNT(*) AS visits` por linha.
+3. A renovação horária do ano e das horas refazia o GROUP BY e repintava
+   sempre. Agora um carimbo barato (linhas, último início) devolve as mesmas
+   linhas quando nada mudou: sem varredura, sem repintura.
+4. Com os dados iguais, um livro que virava "paused" pelo relógio não
+   repintava o card. Agora a consulta compara os status e devolve um objeto
+   novo quando algum mudou.
+5. O `layout` re-espalhava todos os livros quando só um mudava. Agora a
+   densidade é memoizada por livro e largura.
+6. `gridwidget` recebia os cinzas por um setter global; agora por opção
+   (`ink`), como a faixa.
+
 ## Resultado
 
-14 suítes, 246 testes, 0 falhas. Falta o checklist do aparelho em
+14 suítes, 254 testes, 0 falhas. Falta o checklist do aparelho em
 `CARRY-FORWARD.md`.

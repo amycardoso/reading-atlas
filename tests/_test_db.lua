@@ -66,6 +66,7 @@ local ROWS = {
     { 624, 624, 688 },  -- total_pages
     { 19700, 19700, 19650 }, -- day
     { 60, 75, 90 },     -- secs
+    { 1, 2, 1 },        -- visits
     { 1702000000, 1702000100, 1698000000 }, -- last_seen
 }
 local STAMPS = {
@@ -80,18 +81,19 @@ local OFFSET = string.format("|%d", os.difftime(NOW, os.time(os.date("!*t", NOW)
 local SIG7 = "Grande Sertão: Veredas|624|1700000000|2:135:1702000100" .. OFFSET
 
 t.test("books and rows come back as plain Lua values", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*), SUM(duration)"] = STAMPS }
     local got = DB.fingerprintRows(6)
     eq(got.books[1], { id = 7, title = "Grande Sertão: Veredas", pages = 624,
         last_open = 1700000000, sig = SIG7 })
     eq(type(got.books[2].title), "string")
     eq(#got.rows, 3)
     eq(got.rows[3], { id_book = 3, page = 10, total_pages = 688, day = 19650, secs = 90,
-        last_seen = 1698000000 })
+        visits = 1, last_seen = 1698000000 })
+    eq(got.rows[2].visits, 2)
 end)
 
 t.test("the title is read before the connection closes", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*), SUM(duration)"] = STAMPS }
     local got = DB.fingerprintRows(6)
     assert(fake.closed, "connection closed")
     -- A wrapper kept past close() would raise here.
@@ -99,7 +101,7 @@ t.test("the title is read before the connection closes", function()
 end)
 
 t.test("opens read-only, limits the books, and asks only for their rows", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*), SUM(duration)"] = STAMPS }
     DB.fingerprintRows(6)
     eq(fake.opened, { path = "/settings/statistics.sqlite3", mode = "ro" })
     local books_sql, rows_sql
@@ -116,10 +118,11 @@ t.test("opens read-only, limits the books, and asks only for their rows", functi
     assert(rows_sql:find("'unixepoch', 'localtime'", 1, true), rows_sql)
     assert(rows_sql:find("strftime('%s'", 1, true), "the %% must survive string.format: " .. rows_sql)
     assert(rows_sql:find("MAX(start_time) AS last_seen", 1, true), rows_sql)
+    assert(rows_sql:find("COUNT(*) AS visits", 1, true), rows_sql)
 end)
 
 t.test("a known book whose stamp is unchanged gets no page rows", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*), SUM(duration)"] = STAMPS }
     DB.fingerprintRows(6, { [7] = SIG7 })
     local rows_sql
     for _i, s in ipairs(fake.sql) do
@@ -129,7 +132,7 @@ t.test("a known book whose stamp is unchanged gets no page rows", function()
 end)
 
 t.test("when every book is known and unchanged, the page rows are not read at all", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*), SUM(duration)"] = STAMPS }
     local got = DB.fingerprintRows(6, { [7] = SIG7, [3] = "Dune|688|1690000000|1:90:1698000000" .. OFFSET })
     eq(#got.books, 2)
     eq(got.rows, {})
@@ -139,7 +142,7 @@ t.test("when every book is known and unchanged, the page rows are not read at al
 end)
 
 t.test("a retitled book is not unchanged", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*), SUM(duration)"] = STAMPS }
     local old = "Grande Sertao|624|1700000000|2:135:1702000100" .. OFFSET
     DB.fingerprintRows(6, { [7] = old })
     local asked
@@ -150,9 +153,51 @@ t.test("a retitled book is not unchanged", function()
 end)
 
 t.test("books are ordered by last_open, then id, in SQL", function()
-    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*)"] = STAMPS }
+    fake = newFake{ ["SELECT id, title"] = BOOKS, ["SELECT id_book, page"] = ROWS, ["COUNT(*), SUM(duration)"] = STAMPS }
     DB.fingerprintRows(6)
     assert(fake.sql[2]:find("ORDER BY last_open DESC, id", 1, true), fake.sql[2])
+end)
+
+-- ── hourRows ───────────────────────────────────────────────────────────────
+local HOURS = { { 470000, 470001 }, { 1200, 300 } }
+local HSTAMP = { { 9068 }, { 1790723107 } }
+
+t.test("hourRows carries a stamp, and a matching stamp skips the scan", function()
+    fake = newFake{ ["COUNT(*), MAX(start_time)"] = HSTAMP, ["start_time / 3600"] = HOURS }
+    local got = DB.hourRows()
+    eq(#got, 2)
+    eq(got[2], { hour = 470001, secs = 300 })
+    eq(got.stamp, "9068:1790723107")
+    fake = newFake{ ["COUNT(*), MAX(start_time)"] = HSTAMP, ["start_time / 3600"] = HOURS }
+    eq(DB.hourRows("9068:1790723107"), { unchanged = true })
+    for _i, s in ipairs(fake.sql) do
+        assert(not s:find("start_time / 3600", 1, true), "scanned although nothing changed")
+    end
+end)
+
+t.test("the hourly refresh of the year and clock keeps the same rows when nothing changed", function()
+    local scheduled = {}
+    package.loaded["ui/uimanager"] = { scheduleIn = function(_, _s, fn) scheduled[#scheduled + 1] = fn end }
+    local Source = dofile("micromodules/atlas/source.lua")
+    local real_time, clock = os.time, 1000000
+    os.time = function(tt) if tt then return real_time(tt) end return clock end
+    local ok, err = pcall(function()
+        local repaints = 0
+        local cb = function() repaints = repaints + 1 end
+        fake = newFake{ ["COUNT(*), MAX(start_time)"] = HSTAMP, ["start_time / 3600"] = HOURS }
+        Source.get(cb)
+        scheduled[1](); scheduled = {}
+        local first = Source.get(cb)
+        eq(repaints, 1)
+        clock = clock + Source.HOURS_MAX_AGE
+        fake = newFake{ ["COUNT(*), MAX(start_time)"] = HSTAMP, ["start_time / 3600"] = HOURS }
+        Source.get(cb)
+        scheduled[1](); scheduled = {}
+        assert(rawequal(Source.get(cb), first), "the same rows, not a new copy")
+        eq(repaints, 1, "and no repaint")
+    end)
+    os.time = real_time
+    if not ok then error(err, 0) end
 end)
 
 t.test("no qualifying book: an empty answer, and no second query", function()

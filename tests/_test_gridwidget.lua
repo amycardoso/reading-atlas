@@ -108,10 +108,13 @@ t.test("per-instance grid injection via opts.grid", function()
     eq(size.h, 45)
 end)
 
-t.test("setInk hands in the cards' shared table", function()
-    local shared = dofile("micromodules/atlas/ink.lua")
-    GW.setInk(shared)
-    assert(rawequal(GW.ink(), shared))
+t.test("an ink option paints with the cards' shared table", function()
+    local shared = { [0] = 1, [1] = 2, [2] = 3, [3] = 4, [4] = 5 }
+    local w = GW.new{ width = 40, height = 20, cols = 2, rows = 1, grid = REAL_GRID,
+                      ink = shared, level = function() return 3 end }
+    local rects = {}
+    w:paintTo({ paintRect = function(_, _x, _y, _w, _h, c) rects[#rects + 1] = c end }, 0, 0)
+    eq(rects[1].v, 4)
 end)
 
 t.test("isolation: widget unaffected by setGrid after creation", function()

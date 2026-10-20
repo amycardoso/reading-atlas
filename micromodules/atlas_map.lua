@@ -158,7 +158,6 @@ local function render(ctx)
 
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
-    GW.setInk(atlas("ink"))
     -- The label strip has to come out of avail's floor too: flooring at
     -- sc(20) alone left room for the strip only by accident, and a tiny
     -- ctx.height could floor avail at exactly sc(20), leaving grid_h at
@@ -180,6 +179,7 @@ local function render(ctx)
     local plan = planFor(prep, width, grid_h, sface, measure)
 
     local grid = GW.new{
+        ink = atlas("ink"),
         width = width, height = avail, cols = plan.cols, rows = plan.rows,
         col_labels = plan.labels, label_mode = "truncate",
         face = sface, label_color = Kit.COLOR_MUTED,

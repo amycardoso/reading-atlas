@@ -157,6 +157,7 @@ t.test("with data, the card is heading, grid and context line", function()
     local grid = card[3]
     assert(grid.level, "the middle child should be the grid widget")
     eq(grid.label_mode, "truncate")
+    assert(rawequal(grid.ink, package.loaded["atlas/ink"]), "the grid paints the loader's greys")
     eq(grid.level(1, 1), 4, "English's finished book comes first")
 end)
 

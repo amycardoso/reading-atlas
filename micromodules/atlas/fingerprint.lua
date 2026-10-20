@@ -3,10 +3,11 @@
 -- Pure logic, no KOReader. Input is what db.fingerprintRows() returns:
 --
 --   { books = { { id, title, pages, last_open }, … },
---     rows  = { { id_book, page, total_pages, day, secs, last_seen }, … } }
+--     rows  = { { id_book, page, total_pages, day, secs, visits, last_seen }, … } }
 --
 -- where a row is the time spent on one page, in the layout of the moment
--- (total_pages), on one local day; last_seen is the row's latest start_time.
+-- (total_pages), on one local day, over `visits` separate visits; last_seen
+-- is the row's latest start_time.
 --
 -- ── WHY POSITIONS, NOT PAGES ────────────────────────────────────────────────
 -- Changing the font or margins of an EPUB re-paginates it: page 120 of 300
@@ -51,11 +52,11 @@ local function rowSpan(row)
     return (p - 1) / tp, p / tp, p
 end
 
--- Calls fn(k, fraction, x, y, z) for each of n equal buckets the span [a, b)
+-- Calls fn(k, fraction, x, y, z, w) for each of n equal buckets the span [a, b)
 -- overlaps, with the fraction of the span that falls in bucket k; the
--- fractions sum to 1. State goes in x, y, z rather than in a closure, so the
+-- fractions sum to 1. State goes in x, y, z, w rather than a closure, so the
 -- hot loops over thousands of rows allocate no function per row.
-local function spread(a, b, n, fn, x, y, z)
+local function spread(a, b, n, fn, x, y, z, w)
     local A, B = a * n, b * n
     local width = B - A
     if width <= 0 then return end
@@ -63,7 +64,7 @@ local function spread(a, b, n, fn, x, y, z)
     local last = math.min(n, math.ceil(B))
     for k = first, last do
         local overlap = math.min(B, k) - math.max(A, k - 1)
-        if overlap > EPS then fn(k, overlap / width, x, y, z) end
+        if overlap > EPS then fn(k, overlap / width, x, y, z, w) end
     end
 end
 
@@ -87,20 +88,28 @@ M.currentPages = currentPages
 
 -- Time spread over n buckets. Returns secs[k] (seconds spent in bucket k),
 -- read[k] (true when any row touched it) and cover[k] (how much of bucket k
--- rows covered, in buckets, capped at 1: a page read twice is still one page).
+-- the book's pages cover, in buckets). Coverage counts each page of each
+-- layout once: rows are per page PER DAY, and a page read on three days is
+-- still one page -- its time goes to secs three times, its width to cover once.
 local function addToBucket(k, f, acc, s, width)
     acc.secs[k] = acc.secs[k] + s * f
     acc.read[k] = true
-    acc.cover[k] = math.min(1, acc.cover[k] + f * width)
+    if width then acc.cover[k] = math.min(1, acc.cover[k] + f * width) end
 end
 
 function M.buckets(rows, n)
     local acc = { secs = {}, read = {}, cover = {} }
+    local seen = {}
     for k = 1, n do acc.secs[k] = 0; acc.cover[k] = 0 end
     for i = 1, #rows do
         local r = rows[i]
-        local a, b = rowSpan(r)
-        if a then spread(a, b, n, addToBucket, acc, r.secs or 0, (b - a) * n) end
+        local a, b, page = rowSpan(r)
+        if a then
+            local key = page .. ":" .. r.total_pages
+            local width = nil
+            if not seen[key] then seen[key] = true; width = (b - a) * n end
+            spread(a, b, n, addToBucket, acc, r.secs or 0, width)
+        end
     end
     return acc.secs, acc.read, acc.cover
 end
@@ -181,11 +190,11 @@ local function newTally(pages, thr)
     local st = {
         pages = pages, thr = thr,
         w = math.max(5, math.ceil(pages * M.PROGRESS_WINDOW)),
-        secs = {}, isread = {}, spill = {}, seen = {}, best = 0, top = 0,
+        secs = {}, rsecs = {}, isread = {}, spill = {}, seen = {}, best = 0, top = 0,
         reads = {}, starts = {}, -- Fenwick trees
     }
     for p = 1, pages do
-        st.secs[p] = 0; st.spill[p] = 0; st.reads[p] = 0; st.starts[p] = 0
+        st.secs[p] = 0; st.rsecs[p] = 0; st.spill[p] = 0; st.reads[p] = 0; st.starts[p] = 0
     end
     return st
 end
@@ -217,10 +226,18 @@ end
 -- layout counts once as a source, at the first current page it covers;
 -- spill[q] counts the sources that started before page q and still cover it,
 -- so the sources a window [lo, p] sees are the starts inside it plus spill[lo].
-local function addToTally(p, f, st, today, s)
+-- st.secs is all the time spent on a page (for the slowest stretch); st.rsecs
+-- only the time of visits long enough to be reading (SKIM_SECS a visit or
+-- more), which is what decides whether a page was read. Without that split,
+-- paging to the end and back, or on two days, adds 4 s + 4 s of flipping up
+-- to a page "read". today[p] is the day's reading time; every page a row
+-- touches gets a key, so its windows are re-checked.
+local function addToTally(p, f, st, today, s, reading)
     st.secs[p] = st.secs[p] + s * f
-    today[p] = (today[p] or 0) + s * f
-    if not st.isread[p] and st.secs[p] >= st.thr then
+    local rs = reading and s * f or 0
+    st.rsecs[p] = st.rsecs[p] + rs
+    today[p] = (today[p] or 0) + rs
+    if not st.isread[p] and st.rsecs[p] >= st.thr then
         st.isread[p] = true
         fadd(st.reads, st.pages, p, 1)
     end
@@ -231,8 +248,10 @@ end
 local function tallyRow(st, r, today)
     local a, b, page = rowSpan(r)
     if not a then return end
+    local s = r.secs or 0
+    local reading = s / math.max(1, r.visits or 1) >= M.SKIM_SECS
     st.first, st.last = nil, nil
-    spread(a, b, st.pages, addToTally, st, today, r.secs or 0)
+    spread(a, b, st.pages, addToTally, st, today, s, reading)
     local first, last = st.first, st.last
     if not first then return end
     local key = page .. ":" .. r.total_pages
@@ -456,6 +475,17 @@ function M.prepare(data, old)
     return { books = books }
 end
 
+-- density() per book table and width. An unchanged book keeps its table across
+-- refreshes (prepare reuses it), so when only the book being read changed,
+-- only its strip is spread again.
+local _density_memo = setmetatable({}, { __mode = "k" })
+local function densityOf(b, n)
+    local by_n = _density_memo[b]
+    if not by_n then by_n = {}; _density_memo[b] = by_n end
+    if not by_n[n] then by_n[n] = M.density(b.rows, n, b.pages) end
+    return by_n[n]
+end
+
 -- Strips for the first `count` books at n buckets, with one scale shared by
 -- the books on the card so they compare: a hard book reads darker than an
 -- easy one, not just different inside. Level per bucket: nil = not read,
@@ -466,7 +496,7 @@ function M.layout(prep, n, Scale, count)
     local strips, values = {}, {}
     for i = 1, count do
         local b = prep.books[i]
-        local dens = M.density(b.rows, n, b.pages)
+        local dens = densityOf(b, n)
         strips[i] = { book = b, density = dens }
         local thr = b.threshold or M.SKIM_SECS
         for k = 1, n do

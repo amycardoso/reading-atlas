@@ -30,7 +30,21 @@ local function fetch(refresh)
             for _i, b in ipairs(old and old.books or {}) do known[b.id] = b.sig end
             local data = atlas("db").fingerprintRows(F.MAX_BOOKS, known)
             if data == nil then return nil end
-            return F.prepare(data, old)
+            local prep = F.prepare(data, old)
+            -- The status reads the clock: a book can turn "paused" with no
+            -- new data at all. Then the same books come back in a new table,
+            -- so source.lua repaints the card.
+            local now = os.time()
+            local statuses = {}
+            for i, b in ipairs(prep.books) do
+                statuses[i] = F.status(b.progress, b.last_open, now)
+            end
+            local key = table.concat(statuses, ",")
+            if rawequal(prep, old) and old.statuses ~= key then
+                prep = { books = old.books }
+            end
+            prep.statuses = key
+            return prep
         end,
         -- No books is data (read a little more), not "no database" (nil).
         accept = function(result) return result ~= nil end,

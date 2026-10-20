@@ -60,8 +60,8 @@ local function render(ctx)
 
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
-    GW.setInk(atlas("ink"))
     local grid = GW.new{
+        ink = atlas("ink"),
         width = width, height = avail, cols = 24, rows = 7,
         col_labels = hours, face = sface, label_color = Kit.COLOR_MUTED,
         -- col 1 is hour 0; row 1 is Sunday, matching os.date wday.

@@ -522,7 +522,10 @@ local function bruteProgress(rows, pages)
         for k = math.floor(a) + 1, math.min(pages, math.ceil(b)) do
             local ov = math.min(b, k) - math.max(a, k - 1)
             if ov > 1e-9 then
-                secs[k] = secs[k] + r.secs * ov / (b - a)
+                -- Only visits long enough to be reading count toward "read".
+                if r.secs / (r.visits or 1) >= F.SKIM_SECS then
+                    secs[k] = secs[k] + r.secs * ov / (b - a)
+                end
                 first = first or k; last = k
             end
         end
@@ -561,8 +564,10 @@ t.test("the incremental frontier matches the definition, day after day", functio
             local tp = (math.random() < 0.3) and math.random(10, 600) or pages
             local from = math.random(1, tp)
             for p = from, math.min(tp, from + math.random(0, 30)) do
-                local paces = { 2, 8, 12, 20, 60, 90, 150 }
-                rows[#rows + 1] = row(p, tp, d, paces[math.random(1, #paces)])
+                local paces = { 2, 4, 8, 12, 20, 60, 90, 150 }
+                local r = row(p, tp, d, paces[math.random(1, #paces)])
+                if math.random() < 0.2 then r.visits = math.random(2, 4) end
+                rows[#rows + 1] = r
             end
             -- The incremental pass sees days in order; check it each day.
             local got = F.analyze(rows, pages).progress
@@ -671,6 +676,62 @@ t.test("a short book bridges a re-read that skips every other page", function()
     for p = 1, 80 do rows[#rows + 1] = row(p, 80, 1, 60) end
     for p = 10, 30, 2 do rows[#rows + 1] = row(p, 80, 2, 60) end
     eq(rereads(rows, 80), { { from = 10, to = 30 } })
+end)
+
+-- ── review findings, round 8 ───────────────────────────────────────────────
+t.test("a page read on three days covers one page, not three", function()
+    -- 100 pages on 10 buckets: page 1 read 60 s on each of 3 days is 180 s
+    -- on one page -- the same as one 180 s row.
+    local three = { row(1, 100, 1, 60), row(1, 100, 2, 60), row(1, 100, 3, 60) }
+    near(F.density(three, 10, 100)[1], 180)
+    near(F.density({ row(1, 100, 1, 180) }, 10, 100)[1], 180)
+end)
+
+t.test("skims below SKIM_SECS a visit never add up to a page read", function()
+    -- Pages 1..30 read at 30 s (threshold 7.5). Pages 31..100 paged through
+    -- at 4 s on two days: 8 s a page in total, but no visit was reading.
+    local rows = {}
+    for p = 1, 30 do rows[#rows + 1] = row(p, 100, 1, 30) end
+    for d = 2, 3 do
+        for p = 31, 100 do rows[#rows + 1] = row(p, 100, d, 4) end
+    end
+    near(F.analyze(rows, 100).progress, 0.30)
+end)
+
+t.test("paging to the end and back on the same day is two flips, not a read", function()
+    local rows = {}
+    for p = 1, 30 do rows[#rows + 1] = row(p, 100, 1, 30) end
+    for p = 31, 100 do
+        local r = row(p, 100, 1, 8)
+        r.visits = 2
+        rows[#rows + 1] = r
+    end
+    near(F.analyze(rows, 100).progress, 0.30)
+end)
+
+t.test("two real visits on one day still add up", function()
+    -- 20 s over two visits of 10 s is reading (10 >= SKIM_SECS).
+    local rows = {}
+    for p = 1, 50 do
+        local r = row(p, 100, 1, 20)
+        r.visits = 2
+        rows[#rows + 1] = r
+    end
+    near(F.analyze(rows, 100).progress, 0.50)
+end)
+
+t.test("after a refresh, only the changed book's strip is spread again", function()
+    local first = F.prepare(data())
+    F.layout(first, 50, Scale)
+    local d = data()
+    d.books[1].sig = "n2"
+    d.rows = { row(10, 80, 3, 120, 2), row(20, 200, 4, 30, 2), row(21, 200, 5, 60, 2) }
+    local second = F.prepare(d, first)
+    local real, calls = F.density, 0
+    F.density = function(...) calls = calls + 1; return real(...) end
+    F.layout(second, 50, Scale)
+    F.density = real
+    eq(calls, 1, "Old is reused, its strip too")
 end)
 
 t.test("a long book read over many days analyzes quickly", function()

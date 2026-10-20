@@ -44,7 +44,15 @@ M.HOURS_MAX_AGE = 3600
 local function hourDeps()
     local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
     return {
-        query = function() return dofile(dir .. "db.lua").hourRows() end,
+        -- With nothing read since, the old rows come back as the same object:
+        -- no GROUP BY scan, and no repaint (see startQuery).
+        query = function()
+            local old = M.peek("hours")
+            local known = type(old) == "table" and old.stamp or nil
+            local rows = dofile(dir .. "db.lua").hourRows(known)
+            if rows and rows.unchanged then return old end
+            return rows
+        end,
         max_age = M.HOURS_MAX_AGE,
     }
 end

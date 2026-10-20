@@ -23,14 +23,12 @@ local Grid = nil  -- injected below by the spec files' loader, or dofile'd
 
 local M = {}
 
--- Luminance per step, light to dark: atlas/ink.lua. The cards hand in their
--- loader's copy (setInk, like setGrid), so the grid and the fingerprint's
--- strips paint from one table and a retune changes every card together.
--- Resolved lazily, never at load: a path problem must not stop the module
--- from loading.
+-- Luminance per step, light to dark: atlas/ink.lua. Cards pass their loader's
+-- copy as the `ink` option, as they do for the fingerprint's strips, so every
+-- card paints from one table and a retune changes them together. This default
+-- is for standalone use (the suites); resolved lazily, never at load, so a
+-- path problem cannot stop the module from loading.
 local Ink = nil
-function M.setInk(ink) Ink = ink end
-
 function M.ink()
     if not Ink then
         local dir = debug.getinfo(1, "S").source:match("^@(.+/)") or "./"
@@ -166,7 +164,7 @@ function GridWidget:paintTo(bb, x, y)
     end
     y = y + lh
     local step = g.cell + g.gap
-    local ink = M.ink()
+    local ink = self.ink or M.ink()
     for col = 1, self.cols do
         for row = 1, self.rows do
             local lv = self.level(col, row)
@@ -191,6 +189,7 @@ function M.new(opts)
         face        = opts.face,
         label_color = opts.label_color,
         label_mode  = opts.label_mode,
+        ink         = opts.ink,
     }
 end
 

@@ -85,8 +85,8 @@ local function render(ctx)
 
     local GW = atlas("gridwidget")
     GW.setGrid(atlas("grid"))
-    GW.setInk(atlas("ink"))
     local grid = GW.new{
+        ink = atlas("ink"),
         width = width, height = avail, cols = cal.weeks, rows = 7,
         col_labels = months, face = sface, label_color = Kit.COLOR_MUTED,
         level = function(col, row)

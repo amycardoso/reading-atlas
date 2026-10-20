@@ -411,6 +411,30 @@ t.test("a book only skimmed names no stretch it lingered on", function()
     assert(not note:find("lingered", 1, true), note)
 end)
 
+t.test("a book turning 'paused' with no new data still repaints the card", function()
+    local real_time = os.time
+    local fake_now = real_time()
+    os.time = function(tt) if tt then return real_time(tt) end return fake_now end
+    local ok, err = pcall(function()
+        db_answer = sample()
+        db_answer.books[2].last_open = fake_now - 30 * DAY + 1800 -- 29 d 23.5 h
+        local repaints = 0
+        local c = ctx{ refresh = function() repaints = repaints + 1 end }
+        local first = settle(c)
+        assert(bookParts(first, 1).note.text:find("· reading$"), "still reading")
+        eq(repaints, 1)
+        fake_now = fake_now + 3600 -- past 30 days, nothing read
+        FP.render(c)
+        runScheduled()
+        eq(repaints, 2, "the status changed, so the card is redrawn")
+        local note = bookParts(FP.render(c), 1).note.text
+        assert(note:find("paused since ", 1, true), note)
+        eq(db_rows_for, {}, "and still no page rows were read")
+    end)
+    os.time = real_time
+    if not ok then error(err, 0) end
+end)
+
 t.test("as many books as the height allows, at least one", function()
     db_answer = sample()
     -- heading 10 + span 6 + legend 10 = 26; a book is 10+2+20+2+4+10+7 = 55.

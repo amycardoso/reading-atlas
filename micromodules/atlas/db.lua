@@ -54,12 +54,25 @@ local function count(result)
     return result and result[1] and #result[1] or 0
 end
 
--- Returns an array of { hour = n, secs = n }, or nil when there is no
--- readable statistics database.
-function M.hourRows()
+-- How many page rows there are and the latest start: if neither moved, nobody
+-- read since, and the GROUP BY scan above need not run again. COUNT(*) walks
+-- the smallest index; MAX(start_time) is one step down its own index.
+local HOUR_STAMP = [[
+    SELECT COUNT(*), MAX(start_time) FROM page_stat_data;
+]]
+
+-- Returns an array of { hour = n, secs = n } with a `stamp` field, or nil when
+-- there is no readable statistics database. Given the stamp of an earlier
+-- answer that still matches, returns { unchanged = true } instead: the caller
+-- keeps what it has.
+function M.hourRows(known_stamp)
     return withConnection(function(conn)
+        local st = conn:exec(HOUR_STAMP)
+        local stamp = string.format("%s:%s", tostring(tonumber(column(st, 1, 1))),
+            tostring(tonumber(column(st, 2, 1))))
+        if known_stamp and known_stamp == stamp then return { unchanged = true } end
         local result = conn:exec(SQL)
-        local out = {}
+        local out = { stamp = stamp }
         for i = 1, count(result) do
             out[i] = {
                 hour = tonumber(column(result, 1, i)),
@@ -97,7 +110,9 @@ local FP_STAMPS = [[
 ]]
 
 -- Their pages, summed per page, layout and day. A day is all the re-read rule
--- needs, and it keeps a long book to a few thousand rows.
+-- needs, and it keeps a long book to a few thousand rows. `visits` counts the
+-- separate visits summed into a row: 8 s over two visits is two flips, not a
+-- page read.
 --
 -- The day is the reader's LOCAL day: strftime('%s', …, 'localtime') is the
 -- local wall-clock time counted as if it were UTC, so dividing it by 86400
@@ -107,7 +122,7 @@ local FP_STAMPS = [[
 local FP_ROWS = [[
     SELECT id_book, page, total_pages,
            CAST(strftime('%%s', start_time, 'unixepoch', 'localtime') AS INTEGER) / 86400 AS day,
-           SUM(duration) AS secs, MAX(start_time) AS last_seen
+           SUM(duration) AS secs, COUNT(*) AS visits, MAX(start_time) AS last_seen
     FROM page_stat_data
     WHERE id_book IN (%s)
     GROUP BY id_book, page, total_pages, day;
@@ -174,7 +189,8 @@ function M.fingerprintRows(limit, known)
                 total_pages = tonumber(column(r, 3, n)),
                 day = tonumber(column(r, 4, n)),
                 secs = tonumber(column(r, 5, n)) or 0,
-                last_seen = tonumber(column(r, 6, n)),
+                visits = tonumber(column(r, 6, n)) or 1,
+                last_seen = tonumber(column(r, 7, n)),
             }
         end
         return { books = books, rows = rows }
